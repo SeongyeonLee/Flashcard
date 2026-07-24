@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flashcard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: '#1C2B39',
+          paper: '#F3F4F1',
+          case: '#2B6E64',
+          dx: '#B46A21',
+          rx: '#7D3C52',
+          wrong: '#B23A2E',
+          correct: '#2F7D5C'
+        },
+        fontFamily: {
+          sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'Malgun Gothic', 'sans-serif'],
+          mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
+        }
+      }
+    }
+  }
+</script>
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+    body {
+        font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+        background-color: #F3F4F1;
+    }
+
+    .card-container { perspective: 1000px; }
+
+    .flashcard {
+        transition: transform 0.25s ease-in;
+        transform-style: preserve-3d;
+        box-shadow: 0 10px 25px -5px rgba(28,43,57,0.10), 0 8px 10px -6px rgba(28,43,57,0.08);
+    }
+    .flashcard.flip-out { transform: rotateY(90deg); }
+    .flashcard.flip-in { transition: transform 0.25s ease-out; transform: rotateY(0deg); }
+
+    /* Signature texture: faint ruled lines, like a real index card */
+    .rule-lines {
+        background-image: repeating-linear-gradient(to bottom, transparent, transparent 27px, rgba(28,43,57,0.05) 28px);
+    }
+
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    @media (prefers-reduced-motion: reduce) {
+        .flashcard, .flashcard.flip-in, .flashcard.flip-out { transition: none !important; }
+    }
+</style>
+</head>
+<body class="font-sans text-ink h-screen flex flex-col bg-paper">
+
+    <!-- 로딩 오버레이 -->
+    <div id="loading-overlay" class="fixed inset-0 bg-paper z-[100] flex flex-col items-center justify-center">
+        <div class="w-8 h-8 border-2 border-ink/20 border-t-ink rounded-full animate-spin mb-3"></div>
+        <p class="text-sm text-ink/50 font-mono">불러오는 중…</p>
+    </div>
+
+    <!-- 재사용 가능한 단원 목록 (DataList) -->
+    <datalist id="category-list"></datalist>
+
+    <!-- 상단 네비게이션 바 -->
+    <header class="bg-ink text-white shadow-md">
+        <div class="max-w-3xl mx-auto px-4 py-3 flex justify-between items-center gap-2">
+            <div>
+                <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-white/40 leading-none mb-1">Case · Dx · Rx</p>
+                <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight leading-none">Flashcard</h1>
+            </div>
+
+            <div class="flex items-center gap-1.5">
+                <button onclick="exportData()" class="px-2.5 sm:px-3 py-1.5 hover:bg-white/10 rounded-md text-sm font-semibold transition-colors" title="기기에 파일로 백업">백업</button>
+                <button onclick="document.getElementById('import-file').click()" class="px-2.5 sm:px-3 py-1.5 hover:bg-white/10 rounded-md text-sm font-semibold transition-colors" title="파일에서 데이터 불러오기">복원</button>
+                <input type="file" id="import-file" class="hidden" accept=".json,application/json" onchange="importData(event)">
+            </div>
+        </div>
+
+        <div class="flex max-w-3xl mx-auto" id="main-tabs">
+            <button onclick="switchTab('add')" id="tab-add" class="flex-1 py-3 text-center border-b-2 border-case text-white font-semibold transition-colors hover:bg-white/5">
+                추가
+            </button>
+            <button onclick="switchTab('manage')" id="tab-manage" class="flex-1 py-3 text-center border-b-2 border-transparent text-white/45 font-semibold transition-colors hover:bg-white/5">
+                관리
+            </button>
+            <button onclick="switchTab('study-prep')" id="tab-study-prep" class="flex-1 py-3 text-center border-b-2 border-transparent text-white/45 font-semibold transition-colors hover:bg-white/5">
+                학습
+            </button>
+        </div>
+    </header>
+
+    <!-- 메인 컨텐츠 영역 -->
+    <main class="flex-1 overflow-y-auto max-w-3xl w-full mx-auto p-4 flex flex-col relative">
+
+        <!-- ==================== 1. 카드 추가 화면 ==================== -->
+        <section id="view-add" class="bg-white rounded-xl shadow-sm p-5 sm:p-6 mb-4 block">
+            <h2 class="text-lg sm:text-xl font-bold mb-4 text-ink border-b border-ink/10 pb-3 flex justify-between items-center flex-wrap gap-1">
+                새 카드 만들기
+                <span class="text-xs font-mono font-normal text-ink/45">
+                    <span id="card-count">저장된 카드: 0장</span>
+                    <span id="storage-estimate" class="ml-1"></span>
+                </span>
+            </h2>
+
+            <div class="space-y-5">
+                <div class="bg-paper/70 p-4 rounded-lg border border-ink/10">
+                    <h3 class="font-bold text-ink text-sm mb-2">소속 단원 <span class="font-normal text-ink/40">(선택사항)</span></h3>
+                    <input type="text" id="input-category" list="category-list" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 focus:border-ink/30 outline-none" placeholder="단원명을 입력하거나 선택하세요 (기본: 미분류)">
+                </div>
+
+                <!-- CASE -->
+                <div class="bg-case/5 p-4 rounded-lg border-l-4 border-case relative">
+                    <h3 class="font-mono text-xs font-bold tracking-widest text-case mb-2 uppercase">CASE <span class="font-sans font-semibold text-ink/70 normal-case tracking-normal ml-1">— 증례</span></h3>
+                    <label class="block text-sm font-medium text-ink/70 mb-1">증례 설명</label>
+                    <textarea id="input-case-text" rows="3" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-case/40 focus:border-case outline-none resize-none" placeholder="환자의 증상이나 병력을 입력하세요..."></textarea>
+
+                    <div class="flex items-center justify-between mt-3 mb-1">
+                        <label class="block text-sm font-medium text-ink/70">사진 첨부</label>
+                    </div>
+                    <input type="file" id="input-case-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-case/10 file:text-case hover:file:bg-case/20">
+                    <p class="mt-2 text-xs text-ink/40 font-mono">TIP: Ctrl+V로 클립보드 이미지를 바로 붙여넣을 수 있습니다. 이미지는 저장 공간 절약을 위해 자동으로 최적화됩니다.</p>
+
+                    <div id="image-preview-container" class="hidden mt-3 relative inline-block border-2 border-dashed border-case/30 p-2 rounded bg-white">
+                        <img id="image-preview" src="" alt="미리보기" class="max-h-48 rounded object-contain">
+                        <button onclick="clearImage()" class="absolute -top-2 -right-2 bg-wrong text-white rounded-full w-6 h-6 flex items-center justify-center hover:opacity-90 shadow-md text-sm leading-none font-bold" title="사진 삭제">×</button>
+                    </div>
+                </div>
+
+                <!-- DX -->
+                <div class="bg-dx/5 p-4 rounded-lg border-l-4 border-dx">
+                    <h3 class="font-mono text-xs font-bold tracking-widest text-dx mb-2 uppercase">DX <span class="font-sans font-semibold text-ink/70 normal-case tracking-normal ml-1">— 진단명</span></h3>
+                    <input type="text" id="input-diagnosis" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-dx/40 focus:border-dx outline-none" placeholder="진단명을 입력하세요...">
+                </div>
+
+                <!-- RX -->
+                <div class="bg-rx/5 p-4 rounded-lg border-l-4 border-rx">
+                    <h3 class="font-mono text-xs font-bold tracking-widest text-rx mb-2 uppercase">RX <span class="font-sans font-semibold text-ink/70 normal-case tracking-normal ml-1">— 치료법</span></h3>
+                    <textarea id="input-treatment" rows="3" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-rx/40 focus:border-rx outline-none resize-none" placeholder="치료 방법이나 처방을 입력하세요..."></textarea>
+                </div>
+
+                <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-lg shadow transition-colors text-lg">
+                    카드 저장하기
+                </button>
+            </div>
+        </section>
+
+
+        <!-- ==================== 2. 카드 관리 (분류/할당) 화면 ==================== -->
+        <section id="view-manage" class="hidden bg-white rounded-xl shadow-sm p-5 sm:p-6 mb-4 flex-1 flex flex-col">
+            <h2 class="text-lg sm:text-xl font-bold mb-1 text-ink border-b border-ink/10 pb-3 flex justify-between items-center">
+                카드 분류 및 관리
+            </h2>
+            <p class="text-xs font-mono text-ink/40 mb-4 mt-2">저장 방식: <span id="storage-mode-label">확인 중…</span></p>
+
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-ink/70 mb-1">단원별 모아보기 필터</label>
+                <select id="manage-filter-category" onchange="renderManageList()" class="w-full p-2 border border-ink/15 rounded-md focus:ring-2 focus:ring-case/40 focus:border-case outline-none bg-paper/50">
+                    <option value="all">모든 단원 보기</option>
+                </select>
+            </div>
+
+            <div id="manage-list-container" class="flex-1 overflow-y-auto space-y-3 pr-1 hide-scrollbar pb-4">
+                <!-- 카드 리스트 삽입 -->
+            </div>
+
+            <button onclick="resetAllData()" class="mt-3 text-xs text-wrong/60 hover:text-wrong font-semibold py-2 transition-colors self-center">
+                전체 카드 삭제
+            </button>
+        </section>
+
+
+        <!-- ==================== 3. 학습 준비 화면 ==================== -->
+        <section id="view-study-prep" class="hidden bg-white rounded-xl shadow-sm p-6 mb-4 flex-1 flex flex-col items-center justify-center">
+            <h2 class="text-2xl font-bold text-ink mb-6">어떤 단원을 공부할까요?</h2>
+
+            <div class="w-full max-w-sm space-y-6">
+                <div>
+                    <label class="block text-sm font-bold text-ink/70 mb-2">학습할 단원 선택</label>
+                    <select id="study-category-select" class="w-full p-3 border-2 border-case/25 rounded-lg text-lg focus:ring-2 focus:ring-case/40 outline-none text-center appearance-none cursor-pointer bg-case/5">
+                        <option value="all">전체 단원 (모든 카드)</option>
+                    </select>
+                </div>
+
+                <div class="space-y-3 pt-4 border-t border-ink/10">
+                    <button onclick="startStudy('all')" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-xl shadow transition-colors text-lg flex items-center justify-center">
+                        선택 단원 — 모두 학습
+                    </button>
+                    <button onclick="startStudy('wrong')" class="w-full bg-wrong/5 text-wrong border-2 border-wrong/25 hover:bg-wrong/10 font-bold py-4 rounded-xl shadow-sm transition-colors text-lg flex items-center justify-center">
+                        선택 단원 — 오답만 학습
+                    </button>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- ==================== 4. 실제 학습 화면 ==================== -->
+        <section id="view-study" class="hidden flex-1 flex flex-col justify-center items-center py-2 relative">
+
+            <div class="w-full flex justify-between items-center mb-4 px-2">
+                <button onclick="switchTab('study-prep')" class="text-sm font-bold bg-ink/5 text-ink/70 hover:bg-ink/10 py-1.5 px-3 rounded-lg transition-colors flex items-center shadow-sm">
+                    학습 종료
+                </button>
+
+                <span id="study-progress" class="text-sm font-mono font-bold text-ink/50">0 / 0</span>
+
+                <div class="flex gap-2">
+                    <button onclick="shuffleCards()" class="text-sm font-bold bg-ink/5 text-ink/70 hover:bg-ink/10 py-1.5 px-3 rounded-lg transition-colors shadow-sm" title="카드 순서 섞기">섞기</button>
+                </div>
+            </div>
+
+            <div class="w-full text-center mb-2">
+                <span id="study-target-badge" class="text-xs font-mono font-bold bg-ink/5 text-ink/70 py-1 px-2 rounded-full mr-1">단원명</span>
+                <span id="study-mode-badge" class="text-xs font-mono font-bold bg-case/10 text-case py-1 px-2 rounded-full">모두 학습</span>
+            </div>
+
+            <!-- 플래시카드 본체 -->
+            <div class="card-container w-full h-[400px] sm:h-[450px] cursor-pointer" onclick="flipCard()">
+                <div id="flashcard" class="flashcard rule-lines w-full h-full bg-white rounded-2xl p-6 flex flex-col items-center justify-center text-center relative border border-ink/10 border-t-4 border-t-case">
+
+                    <div class="absolute top-5 right-5 flex space-x-1" id="side-indicators">
+                        <div class="w-2 h-2 rounded-full bg-case"></div>
+                        <div class="w-2 h-2 rounded-full bg-ink/15"></div>
+                        <div class="w-2 h-2 rounded-full bg-ink/15"></div>
+                    </div>
+
+                    <div id="card-label" class="absolute top-5 left-5 font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-case/10 text-case max-w-[55%] truncate">
+                        CASE
+                    </div>
+
+                    <div class="w-full h-full flex flex-col overflow-y-auto hide-scrollbar pt-8 pb-4">
+                        <div id="card-content" class="m-auto w-full flex flex-col items-center">
+                            <!-- 컨텐츠 -->
+                        </div>
+                    </div>
+
+                    <div class="absolute bottom-4 text-ink/30 text-sm flex items-center">
+                        클릭해서 다음 장 보기
+                    </div>
+                </div>
+            </div>
+
+            <p class="text-[11px] text-ink/35 font-mono mt-2 hidden sm:block">Space 카드 뒤집기 · ← 틀림 · → 맞음</p>
+
+            <!-- 평가 버튼 -->
+            <div class="flex w-full gap-4 mt-4">
+                <button onclick="markCard(true)" class="flex-1 bg-white border-2 border-wrong/25 hover:bg-wrong/5 text-wrong font-bold py-4 rounded-xl shadow-sm transition-colors text-lg flex items-center justify-center">
+                    틀림 (오답)
+                </button>
+                <button onclick="markCard(false)" class="flex-1 bg-white border-2 border-correct/25 hover:bg-correct/5 text-correct font-bold py-4 rounded-xl shadow-sm transition-colors text-lg flex items-center justify-center">
+                    맞음 (정답)
+                </button>
+            </div>
+        </section>
+
+        <!-- ==================== 5. 학습 결과 화면 ==================== -->
+        <section id="view-result" class="hidden flex-1 flex flex-col items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-md text-center border border-ink/10">
+                <h2 class="text-2xl font-bold text-ink mb-1">학습 완료!</h2>
+                <p class="text-ink/50 mb-6">이번 세션의 학습 결과를 확인하세요.</p>
+
+                <div id="result-circle" class="w-36 h-36 rounded-full flex items-center justify-center relative mb-8 mx-auto shadow-inner transition-all duration-1000 ease-out" style="background: conic-gradient(#2B6E64 0%, #E7E5DE 0%);">
+                    <div class="w-32 h-32 bg-white rounded-full flex items-center justify-center absolute shadow-sm">
+                        <div class="flex flex-col items-center">
+                            <span class="text-xs text-ink/40 font-bold mb-1">정답률</span>
+                            <span class="text-4xl font-black font-mono text-case" id="result-accuracy">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-between bg-paper/60 rounded-xl p-4 mb-6 border border-ink/10">
+                    <div class="text-center w-1/3">
+                        <p class="text-xs text-ink/50 font-semibold mb-1">전체 문제</p>
+                        <p class="text-xl font-bold font-mono text-ink" id="result-total">0</p>
+                    </div>
+                    <div class="text-center w-1/3 border-l border-r border-ink/10">
+                        <p class="text-xs text-ink/50 font-semibold mb-1">정답</p>
+                        <p class="text-xl font-bold font-mono text-correct" id="result-correct">0</p>
+                    </div>
+                    <div class="text-center w-1/3">
+                        <p class="text-xs text-ink/50 font-semibold mb-1">오답</p>
+                        <p class="text-xl font-bold font-mono text-wrong" id="result-wrong">0</p>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <button onclick="switchTab('study-prep')" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-3.5 rounded-xl transition-colors shadow-sm text-lg">
+                        돌아가기
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 빈 상태 안내 화면 -->
+        <section id="view-empty" class="hidden flex-1 flex flex-col items-center justify-center text-ink/50 mt-10">
+            <h3 class="text-xl font-bold text-ink/70 mb-2" id="empty-title">학습할 카드가 없습니다.</h3>
+            <p id="empty-desc">조건에 맞는 카드가 없거나 아직 추가되지 않았습니다.</p>
+        </section>
+
+    </main>
+
+    <!-- 백업 파일 복원 모드 선택 모달 -->
+    <div id="import-modal" class="hidden fixed inset-0 bg-ink/40 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+            <h3 class="text-lg font-bold text-ink mb-2">백업 파일 복원</h3>
+            <p class="text-sm text-ink/60 mb-5">불러온 파일에 <span id="import-modal-count" class="font-mono font-bold text-ink">0</span>장의 카드가 있습니다. 어떻게 반영할까요?</p>
+            <div class="space-y-2">
+                <button onclick="confirmImport('merge')" class="w-full py-3 rounded-lg bg-ink text-white font-bold hover:bg-ink/90 transition-colors">
+                    기존 카드에 추가 (병합)
+                </button>
+                <button onclick="confirmImport('replace')" class="w-full py-3 rounded-lg border-2 border-wrong/40 text-wrong font-bold hover:bg-wrong/5 transition-colors">
+                    전체 교체 (기존 카드 삭제 후 덮어쓰기)
+                </button>
+                <button onclick="closeImportModal()" class="w-full py-2.5 rounded-lg text-ink/50 font-semibold hover:bg-paper transition-colors">
+                    취소
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 토스트 알림 -->
+    <div id="toast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-ink text-white px-6 py-3 rounded-full opacity-0 transition-opacity duration-300 pointer-events-none shadow-lg z-50">
+        알림 메시지
+    </div>
+
+    <script>
+        // ==================== 전역 상태 ====================
+        let cards = [];
+        let currentTab = 'add';
+        let currentStudyList = [];
+        let currentIndex = 0;
+        let currentSide = 0;
+        let isFlipping = false;
+        let currentImageBase64 = null;
+
+        let sessionTotal = 0;
+        let sessionCorrect = 0;
+
+        let pendingImportCards = null;
+
+        const LS_KEY = 'medical_flashcards_data'; // 기존 버전과 동일한 키 (자동 이전을 위해 유지)
+        const DB_NAME = 'flashcard_studio_db';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'cards';
+
+        let storageMode = 'indexeddb'; // 'indexeddb' | 'localstorage'
+        let dbInstance = null;
+
+        // ==================== IndexedDB 저장소 (대용량 지원) ====================
+        function openDatabase() {
+            return new Promise((resolve, reject) => {
+                if (!('indexedDB' in window)) {
+                    reject(new Error('IndexedDB not supported'));
+                    return;
+                }
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                    }
+                };
+                request.onsuccess = (event) => resolve(event.target.result);
+                request.onerror = (event) => reject(event.target.error);
+                request.onblocked = () => reject(new Error('IndexedDB blocked'));
+            });
+        }
+
+        async function getDB() {
+            if (dbInstance) return dbInstance;
+            dbInstance = await openDatabase();
+            return dbInstance;
+        }
+
+        async function dbGetAll() {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readonly');
+                const req = tx.objectStore(STORE_NAME).getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function dbPut(card) {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                tx.objectStore(STORE_NAME).put(card);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
+        async function dbDelete(id) {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                tx.objectStore(STORE_NAME).delete(id);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
+        async function dbBulkReplace(newCards) {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                const store = tx.objectStore(STORE_NAME);
+                store.clear();
+                newCards.forEach(c => store.put(c));
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
+        async function dbClearAll() {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                tx.objectStore(STORE_NAME).clear();
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
+        // ==================== 저장소 추상화 (IndexedDB 우선, localStorage 대체) ====================
+        async function initStorage() {
+            try {
+                await getDB();
+                storageMode = 'indexeddb';
+            } catch (e) {
+                console.warn('IndexedDB를 사용할 수 없어 localStorage로 대체합니다.', e);
+                storageMode = 'localstorage';
+            }
+        }
+
+        async function migrateLegacyLocalStorage() {
+            if (storageMode !== 'indexeddb') return;
+            let raw;
+            try {
+                raw = localStorage.getItem(LS_KEY);
+            } catch (e) {
+                return;
+            }
+            if (!raw) return;
+            try {
+                const existing = await dbGetAll();
+                if (existing.length > 0) return; // 이미 새 저장소에 데이터가 있으면 건너뜀
+                const parsed = JSON.parse(raw);
+                if (!Array.isArray(parsed) || parsed.length === 0) return;
+                const normalized = parsed.map(c => normalizeCard(c));
+                await dbBulkReplace(normalized);
+                localStorage.removeItem(LS_KEY);
+                console.info(`기존 카드 ${normalized.length}장을 새 저장소(IndexedDB)로 이전했습니다.`);
+            } catch (e) {
+                console.error('기존 데이터 이전 실패', e);
+            }
+        }
+
+        async function loadAllCards() {
+            if (storageMode === 'indexeddb') {
+                try {
+                    return await dbGetAll();
+                } catch (e) {
+                    console.error('카드를 불러오지 못했습니다.', e);
+                    return [];
+                }
+            } else {
+                try {
+                    const raw = localStorage.getItem(LS_KEY);
+                    return raw ? JSON.parse(raw) : [];
+                } catch (e) {
+                    return [];
+                }
+            }
+        }
+
+        async function persistAll(list) {
+            if (storageMode === 'indexeddb') {
+                await dbBulkReplace(list);
+            } else {
+                localStorage.setItem(LS_KEY, JSON.stringify(list));
+            }
+        }
+
+        async function persistOne(card) {
+            if (storageMode === 'indexeddb') {
+                await dbPut(card);
+            } else {
+                await persistAll(cards);
+            }
+        }
+
+        async function removeOne(id) {
+            if (storageMode === 'indexeddb') {
+                await dbDelete(id);
+            } else {
+                await persistAll(cards);
+            }
+        }
+
+        // ==================== 유틸 ====================
+        function generateId() {
+            if (window.crypto && typeof crypto.randomUUID === 'function') {
+                return crypto.randomUUID();
+            }
+            return 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+        }
+
+        function normalizeCard(raw, opts) {
+            opts = opts || {};
+            const c = raw || {};
+            let id = c.id;
+            if (opts.forceNewId || id === undefined || id === null || id === '') {
+                id = generateId();
+            } else {
+                id = String(id); // 과거 버전의 숫자 id 등을 문자열로 통일
+            }
+            let category = (typeof c.category === 'string') ? c.category.trim() : '';
+            if (!category) category = '미분류';
+            return {
+                id: id,
+                category: category,
+                caseText: typeof c.caseText === 'string' ? c.caseText : '',
+                caseImage: (typeof c.caseImage === 'string' && c.caseImage) ? c.caseImage : null,
+                diagnosis: typeof c.diagnosis === 'string' ? c.diagnosis : '',
+                treatment: typeof c.treatment === 'string' ? c.treatment : '',
+                isWrong: typeof c.isWrong === 'boolean' ? c.isWrong : true
+            };
+        }
+
+        function escapeHTML(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // ==================== 초기화 ====================
+        async function init() {
+            await initStorage();
+            await migrateLegacyLocalStorage();
+            const loaded = await loadAllCards();
+            cards = loaded.map(c => normalizeCard(c));
+            updateCardCount();
+            updateCategoryDatalist();
+
+            const modeLabelEl = document.getElementById('storage-mode-label');
+            if (modeLabelEl) {
+                modeLabelEl.textContent = storageMode === 'indexeddb'
+                    ? 'IndexedDB (대용량 지원)'
+                    : 'localStorage (용량 제한 있음)';
+            }
+
+            hideLoadingOverlay();
+        }
+
+        function hideLoadingOverlay() {
+            const el = document.getElementById('loading-overlay');
+            if (el) el.remove();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            init();
+
+            const imageInput = document.getElementById('input-case-image');
+            imageInput.addEventListener('change', function (e) {
+                const file = e.target.files[0];
+                if (file) processImageFile(file);
+            });
+
+            document.addEventListener('paste', function (e) {
+                if (document.getElementById('view-add').classList.contains('hidden')) return;
+
+                const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+                for (let index = 0; index < items.length; index++) {
+                    const item = items[index];
+                    if (item.kind === 'file' && item.type.indexOf('image/') !== -1) {
+                        const blob = item.getAsFile();
+                        processImageFile(blob);
+                        e.preventDefault();
+                        showToast('클립보드의 이미지를 붙여넣었습니다!');
+                        break;
+                    }
+                }
+            });
+
+            document.addEventListener('keydown', function (e) {
+                const studyView = document.getElementById('view-study');
+                if (studyView.classList.contains('hidden')) return;
+                const tag = document.activeElement ? document.activeElement.tagName : '';
+                if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+                if (e.code === 'Space' || e.code === 'Enter') {
+                    e.preventDefault();
+                    flipCard();
+                } else if (e.code === 'ArrowRight') {
+                    e.preventDefault();
+                    markCard(false);
+                } else if (e.code === 'ArrowLeft') {
+                    e.preventDefault();
+                    markCard(true);
+                }
+            });
+        });
+
+        // ==================== 이미지 처리 (자동 리사이즈/압축) ====================
+        function processImageFile(file) {
+            if (!file.type || file.type.indexOf('image/') !== 0) {
+                alert('이미지 파일만 첨부할 수 있습니다.');
+                return;
+            }
+
+            const MAX_DIMENSION = 1600;
+            const JPEG_QUALITY = 0.85;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const img = new Image();
+                img.onload = function () {
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+                        if (width > height) {
+                            height = Math.round(height * (MAX_DIMENSION / width));
+                            width = MAX_DIMENSION;
+                        } else {
+                            width = Math.round(width * (MAX_DIMENSION / height));
+                            height = MAX_DIMENSION;
+                        }
+                    }
+
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillRect(0, 0, width, height);
+                        ctx.drawImage(img, 0, 0, width, height);
+                        currentImageBase64 = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+                    } catch (err) {
+                        console.warn('이미지 압축 실패, 원본을 사용합니다.', err);
+                        currentImageBase64 = e.target.result;
+                    }
+
+                    document.getElementById('image-preview').src = currentImageBase64;
+                    document.getElementById('image-preview-container').classList.remove('hidden');
+                };
+                img.onerror = function () {
+                    alert('이미지를 불러올 수 없습니다. 다른 파일을 시도해주세요.');
+                };
+                img.src = e.target.result;
+            };
+            reader.onerror = function () {
+                alert('파일을 읽는 중 오류가 발생했습니다.');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // ==================== 카드 수/용량 표시 ====================
+        function estimateStorageBytes() {
+            let total = 0;
+            for (const c of cards) {
+                total += (c.caseText || '').length;
+                total += (c.diagnosis || '').length;
+                total += (c.treatment || '').length;
+                if (c.caseImage) total += c.caseImage.length * 0.75; // base64 -> 대략적인 원본 바이트
+            }
+            return total;
+        }
+
+        function updateCardCount() {
+            document.getElementById('card-count').textContent = `저장된 카드: ${cards.length}장`;
+            const mb = estimateStorageBytes() / (1024 * 1024);
+            const label = mb < 0.1 ? '(<0.1MB)' : `(약 ${mb.toFixed(1)}MB)`;
+            const el = document.getElementById('storage-estimate');
+            if (el) el.textContent = label;
+        }
+
+        function getUniqueCategories() {
+            const categories = new Set(cards.map(c => c.category));
+            return Array.from(categories).sort((a, b) => a.localeCompare(b, 'ko'));
+        }
+
+        function updateCategoryDatalist() {
+            const list = document.getElementById('category-list');
+            list.innerHTML = '';
+            getUniqueCategories().forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat;
+                list.appendChild(option);
+            });
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.remove('opacity-0');
+            toast.classList.add('opacity-100');
+            clearTimeout(toast._hideTimer);
+            toast._hideTimer = setTimeout(() => {
+                toast.classList.remove('opacity-100');
+                toast.classList.add('opacity-0');
+            }, 2500);
+        }
+
+        // ==================== 백업(내보내기) ====================
+        async function exportData() {
+            if (cards.length === 0) { alert('백업할 카드가 없습니다.'); return; }
+
+            showToast('백업 파일 생성 중...');
+            await new Promise(r => setTimeout(r, 30)); // 토스트가 먼저 그려지도록 한 프레임 양보
+
+            try {
+                const payload = {
+                    format: 'flashcard-backup',
+                    version: 1,
+                    exportedAt: new Date().toISOString(),
+                    count: cards.length,
+                    cards: cards
+                };
+                const dataStr = JSON.stringify(payload);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+                a.download = `flashcards_backup_${stamp}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showToast(`백업 완료 (카드 ${cards.length}장, ${sizeMB}MB)`);
+            } catch (e) {
+                console.error(e);
+                alert('백업 파일 생성 중 오류가 발생했습니다: ' + (e && e.message ? e.message : e));
+            }
+        }
+
+        // ==================== 복원(가져오기) ====================
+        function importData(event) {
+            const file = event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+
+            showToast('백업 파일을 읽는 중...');
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                let parsed;
+                try {
+                    parsed = JSON.parse(e.target.result);
+                } catch (err) {
+                    alert('파일을 읽을 수 없습니다. 올바른 JSON 백업 파일인지 확인해주세요.');
+                    return;
+                }
+
+                let rawCards;
+                if (Array.isArray(parsed)) {
+                    rawCards = parsed; // 이전 버전 형식 (배열 그대로)
+                } else if (parsed && Array.isArray(parsed.cards)) {
+                    rawCards = parsed.cards; // 새 버전 형식 ({ cards: [...] })
+                } else {
+                    alert('백업 파일 형식이 올바르지 않습니다 (카드 목록을 찾을 수 없습니다).');
+                    return;
+                }
+
+                if (rawCards.length === 0) {
+                    alert('백업 파일에 카드가 없습니다.');
+                    return;
+                }
+
+                pendingImportCards = rawCards.map(c => normalizeCard(c));
+                openImportModal(pendingImportCards.length);
+            };
+            reader.onerror = function () {
+                alert('파일을 읽는 중 오류가 발생했습니다.');
+            };
+            reader.readAsText(file);
+        }
+
+        function openImportModal(count) {
+            document.getElementById('import-modal-count').textContent = count;
+            document.getElementById('import-modal').classList.remove('hidden');
+        }
+
+        function closeImportModal() {
+            document.getElementById('import-modal').classList.add('hidden');
+            pendingImportCards = null;
+        }
+
+        async function confirmImport(mode) {
+            if (!pendingImportCards) { closeImportModal(); return; }
+            const importCards = pendingImportCards;
+            closeImportModal();
+
+            showToast('복원 중...');
+            await new Promise(r => setTimeout(r, 30));
+
+            try {
+                if (mode === 'replace') {
+                    cards = importCards.map(c => normalizeCard(c));
+                } else {
+                    const withNewIds = importCards.map(c => normalizeCard(c, { forceNewId: true }));
+                    cards = [...cards, ...withNewIds];
+                }
+                await persistAll(cards);
+
+                updateCardCount();
+                updateCategoryDatalist();
+                switchTab('manage');
+                showToast(`복원 완료 (카드 ${importCards.length}장 ${mode === 'merge' ? '추가됨' : '으로 교체됨'})`);
+            } catch (e) {
+                console.error(e);
+                alert('복원 중 오류가 발생했습니다: ' + (e && e.message ? e.message : e));
+            }
+        }
+
+        // ==================== 화면(탭) 전환 ====================
+        function switchTab(tab) {
+            currentTab = tab;
+            const tabs = ['add', 'manage', 'study-prep'];
+            tabs.forEach(t => {
+                const el = document.getElementById(`tab-${t}`);
+                if (!el) return;
+                if (t === tab) {
+                    el.classList.remove('border-transparent', 'text-white/45');
+                    el.classList.add('border-case', 'text-white');
+                } else {
+                    el.classList.remove('border-case', 'text-white');
+                    el.classList.add('border-transparent', 'text-white/45');
+                }
+            });
+
+            ['view-add', 'view-manage', 'view-study-prep', 'view-study', 'view-result', 'view-empty'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+
+            if (tab === 'add') {
+                document.getElementById('view-add').classList.remove('hidden');
+                updateCategoryDatalist();
+            } else if (tab === 'manage') {
+                document.getElementById('view-manage').classList.remove('hidden');
+                updateManageCategoryFilter();
+                renderManageList();
+            } else if (tab === 'study-prep') {
+                document.getElementById('view-study-prep').classList.remove('hidden');
+                updateStudyCategorySelect();
+            } else if (tab === 'study') {
+                document.getElementById('view-study').classList.remove('hidden');
+            } else if (tab === 'result') {
+                document.getElementById('view-result').classList.remove('hidden');
+            }
+        }
+
+        // ==================== 1. 카드 추가 기능 ====================
+        function clearImage() {
+            currentImageBase64 = null;
+            document.getElementById('input-case-image').value = '';
+            document.getElementById('image-preview-container').classList.add('hidden');
+        }
+
+        async function addCard() {
+            let category = document.getElementById('input-category').value.trim();
+            if (!category) category = '미분류';
+
+            const caseText = document.getElementById('input-case-text').value.trim();
+            const diagnosis = document.getElementById('input-diagnosis').value.trim();
+            const treatment = document.getElementById('input-treatment').value.trim();
+
+            if (!caseText && !currentImageBase64) return alert('증례 설명이나 사진 중 하나는 필수입니다.');
+            if (!diagnosis) return alert('진단명을 입력해주세요.');
+            if (!treatment) return alert('치료법을 입력해주세요.');
+
+            const newCard = normalizeCard({
+                id: generateId(),
+                category: category,
+                caseText: caseText,
+                caseImage: currentImageBase64,
+                diagnosis: diagnosis,
+                treatment: treatment,
+                isWrong: true
+            });
+
+            cards.push(newCard);
+            try {
+                await persistOne(newCard);
+            } catch (e) {
+                cards.pop();
+                console.error(e);
+                alert('카드 저장에 실패했습니다: ' + (e && e.message ? e.message : e));
+                return;
+            }
+
+            updateCardCount();
+            updateCategoryDatalist();
+
+            document.getElementById('input-case-text').value = '';
+            document.getElementById('input-diagnosis').value = '';
+            document.getElementById('input-treatment').value = '';
+            clearImage();
+
+            document.getElementById('input-case-text').focus();
+            showToast('카드가 성공적으로 저장되었습니다!');
+        }
+
+        // ==================== 2. 카드 관리(분류) 기능 ====================
+        function updateManageCategoryFilter() {
+            const filterSelect = document.getElementById('manage-filter-category');
+            const currentValue = filterSelect.value;
+
+            filterSelect.innerHTML = '<option value="all">모든 단원 보기</option>';
+            const categories = getUniqueCategories();
+            categories.forEach(cat => {
+                const opt = document.createElement('option');
+                opt.value = cat;
+                opt.textContent = cat;
+                filterSelect.appendChild(opt);
+            });
+
+            if (categories.includes(currentValue) || currentValue === 'all') {
+                filterSelect.value = currentValue;
+            } else {
+                filterSelect.value = 'all';
+            }
+        }
+
+        function renderManageList() {
+            const container = document.getElementById('manage-list-container');
+            const filterCategory = document.getElementById('manage-filter-category').value;
+
+            container.innerHTML = '';
+
+            let filteredCards = cards;
+            if (filterCategory !== 'all') {
+                filteredCards = cards.filter(c => c.category === filterCategory);
+            }
+
+            filteredCards.slice().reverse().forEach(card => {
+                const item = document.createElement('div');
+                item.className = "p-4 border border-ink/10 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white hover:bg-paper/60 transition-colors";
+
+                const rawCase = card.caseText || (card.caseImage ? '(사진 증례)' : '');
+                const shortCase = rawCase.length > 34 ? rawCase.substring(0, 34) + '…' : rawCase;
+                const statusTag = card.isWrong
+                    ? '<span class="text-[10px] font-mono font-bold text-wrong border border-wrong/40 rounded px-1.5 py-0.5">오답</span>'
+                    : '<span class="text-[10px] font-mono font-bold text-correct border border-correct/40 rounded px-1.5 py-0.5">정답</span>';
+
+                item.innerHTML = `
+                    <div class="flex-1 min-w-0 w-full">
+                        <div class="flex items-center gap-2 mb-1 flex-wrap">
+                            <span class="text-[11px] font-mono font-bold px-2 py-0.5 bg-ink/5 text-ink/70 rounded truncate max-w-[120px]" title="${escapeHTML(card.category)}">${escapeHTML(card.category)}</span>
+                            <h4 class="font-bold text-ink truncate">${escapeHTML(card.diagnosis)}</h4>
+                            ${statusTag}
+                        </div>
+                        <p class="text-sm text-ink/50 truncate">${escapeHTML(shortCase)}</p>
+                    </div>
+                    <div class="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                        <input type="text" list="category-list" value="${escapeHTML(card.category)}"
+                            onchange="updateCardCategory('${card.id}', this.value)"
+                            class="flex-1 sm:w-32 p-2 text-sm border border-ink/15 rounded focus:ring-1 focus:ring-case focus:border-case outline-none"
+                            placeholder="단원 변경">
+                        <button onclick="deleteCard('${card.id}')" class="px-3 py-2 text-sm font-semibold text-wrong hover:bg-wrong/10 rounded border border-wrong/25 transition-colors" title="삭제">삭제</button>
+                    </div>
+                `;
+                container.appendChild(item);
+            });
+
+            if (filteredCards.length === 0) {
+                if (cards.length === 0) {
+                    container.innerHTML = '<p class="text-center text-ink/40 py-16">아직 만든 카드가 없습니다.<br>‘추가’ 탭에서 첫 카드를 만들어보세요.</p>';
+                } else {
+                    container.innerHTML = '<p class="text-center text-ink/40 py-16">이 단원에는 카드가 없습니다.</p>';
+                }
+            }
+        }
+
+        async function updateCardCategory(id, newCategory) {
+            newCategory = (newCategory || '').trim() || '미분류';
+            const card = cards.find(c => c.id === id);
+            if (!card) return;
+            const prev = card.category;
+            card.category = newCategory;
+            try {
+                await persistOne(card);
+            } catch (e) {
+                card.category = prev;
+                console.error(e);
+                alert('단원 변경 저장에 실패했습니다.');
+                renderManageList();
+                return;
+            }
+            updateManageCategoryFilter();
+            updateCategoryDatalist();
+            showToast('단원이 변경되었습니다.');
+        }
+
+        async function deleteCard(id) {
+            if (!confirm('정말 이 카드를 삭제하시겠습니까?')) return;
+            const idx = cards.findIndex(c => c.id === id);
+            if (idx === -1) return;
+            const removed = cards.splice(idx, 1)[0];
+            try {
+                await removeOne(id);
+            } catch (e) {
+                cards.splice(idx, 0, removed);
+                console.error(e);
+                alert('삭제에 실패했습니다.');
+            }
+            updateManageCategoryFilter();
+            renderManageList();
+            updateCardCount();
+            updateCategoryDatalist();
+        }
+
+        async function resetAllData() {
+            if (cards.length === 0) { alert('삭제할 카드가 없습니다.'); return; }
+            if (!confirm(`전체 ${cards.length}장의 카드를 모두 삭제합니다. 이 작업은 되돌릴 수 없습니다. 계속할까요?`)) return;
+            if (!confirm('한 번 더 확인합니다. 삭제 전에 백업 파일을 만들어두는 것을 권장합니다. 정말 전체 삭제할까요?')) return;
+
+            cards = [];
+            try {
+                if (storageMode === 'indexeddb') {
+                    await dbClearAll();
+                } else {
+                    localStorage.removeItem(LS_KEY);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+            updateCardCount();
+            updateCategoryDatalist();
+            updateManageCategoryFilter();
+            renderManageList();
+            showToast('모든 카드가 삭제되었습니다.');
+        }
+
+        // ==================== 3. 학습 기능 및 결과화면 ====================
+        function updateStudyCategorySelect() {
+            const select = document.getElementById('study-category-select');
+            select.innerHTML = '<option value="all">전체 단원 (모든 카드)</option>';
+
+            getUniqueCategories().forEach(cat => {
+                const opt = document.createElement('option');
+                opt.value = cat;
+                const count = cards.filter(c => c.category === cat).length;
+                opt.textContent = `${cat} (${count}장)`;
+                select.appendChild(opt);
+            });
+        }
+
+        function startStudy(mode) {
+            const targetCategory = document.getElementById('study-category-select').value;
+
+            let targetCards = cards;
+            let targetLabel = '전체 단원';
+
+            if (targetCategory !== 'all') {
+                targetCards = cards.filter(c => c.category === targetCategory);
+                targetLabel = targetCategory;
+            }
+
+            if (mode === 'wrong') {
+                currentStudyList = targetCards.filter(c => c.isWrong);
+                document.getElementById('study-mode-badge').textContent = '오답 노트';
+                document.getElementById('study-mode-badge').className = 'text-xs font-mono font-bold bg-wrong/10 text-wrong py-1 px-2 rounded-full';
+            } else {
+                currentStudyList = [...targetCards];
+                document.getElementById('study-mode-badge').textContent = '모두 학습';
+                document.getElementById('study-mode-badge').className = 'text-xs font-mono font-bold bg-case/10 text-case py-1 px-2 rounded-full';
+            }
+
+            document.getElementById('study-target-badge').textContent = targetLabel;
+
+            switchTab('study');
+
+            if (currentStudyList.length === 0) {
+                document.getElementById('view-study').classList.add('hidden');
+                document.getElementById('view-empty').classList.remove('hidden');
+                if (mode === 'wrong') {
+                    document.getElementById('empty-title').textContent = '틀린 카드가 없습니다!';
+                    document.getElementById('empty-desc').textContent = '선택한 단원에 오답이 없습니다. 훌륭합니다!';
+                } else {
+                    document.getElementById('empty-title').textContent = '학습할 카드가 없습니다.';
+                    document.getElementById('empty-desc').textContent = '조건에 맞는 카드가 없거나 아직 추가되지 않았습니다.';
+                }
+                return;
+            }
+
+            currentIndex = 0;
+            sessionTotal = currentStudyList.length;
+            sessionCorrect = 0;
+
+            renderCard();
+        }
+
+        function shuffleCards() {
+            if (currentStudyList.length <= 1) return;
+
+            for (let i = currentStudyList.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [currentStudyList[i], currentStudyList[j]] = [currentStudyList[j], currentStudyList[i]];
+            }
+
+            currentIndex = 0;
+            const cardElement = document.getElementById('flashcard');
+            cardElement.style.transition = 'none';
+            cardElement.style.transform = 'rotateY(0deg)';
+            renderCard();
+            void cardElement.offsetWidth;
+            cardElement.style.transition = 'transform 0.25s ease-in';
+
+            showToast('카드 순서가 섞였습니다!');
+        }
+
+        function renderCard() {
+            currentSide = 0;
+            updateCardUI();
+            updateProgress();
+        }
+
+        function updateProgress() {
+            document.getElementById('study-progress').textContent = `${currentIndex + 1} / ${currentStudyList.length}`;
+        }
+
+        function flipCard() {
+            if (isFlipping) return;
+            isFlipping = true;
+
+            const cardElement = document.getElementById('flashcard');
+            cardElement.classList.add('flip-out');
+
+            setTimeout(() => {
+                currentSide = (currentSide + 1) % 3;
+                updateCardUI();
+
+                cardElement.classList.remove('flip-out');
+                cardElement.classList.add('flip-in');
+
+                setTimeout(() => {
+                    cardElement.classList.remove('flip-in');
+                    isFlipping = false;
+                }, 250);
+            }, 250);
+        }
+
+        function updateCardUI() {
+            const card = currentStudyList[currentIndex];
+            const contentEl = document.getElementById('card-content');
+            const labelEl = document.getElementById('card-label');
+            const flashcardEl = document.getElementById('flashcard');
+            const indicators = document.getElementById('side-indicators').children;
+
+            const sides = [
+                { tag: 'CASE', color: 'case' },
+                { tag: 'DX', color: 'dx' },
+                { tag: 'RX', color: 'rx' }
+            ];
+            const active = sides[currentSide];
+
+            flashcardEl.classList.remove('border-t-case', 'border-t-dx', 'border-t-rx');
+            flashcardEl.classList.add('border-t-' + active.color);
+
+            for (let i = 0; i < 3; i++) {
+                indicators[i].className = i === currentSide
+                    ? `w-2 h-2 rounded-full bg-${sides[i].color}`
+                    : 'w-2 h-2 rounded-full bg-ink/15';
+            }
+
+            labelEl.className = `absolute top-5 left-5 font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-${active.color}/10 text-${active.color} max-w-[55%] truncate`;
+
+            if (currentSide === 0) {
+                labelEl.textContent = `CASE · ${card.category}`;
+
+                let html = '';
+                if (card.caseImage) {
+                    html += `<img src="${card.caseImage}" class="max-h-56 object-contain mb-4 rounded mx-auto shadow-sm" alt="증례 이미지">`;
+                }
+                if (card.caseText) {
+                    html += `<p class="text-lg md:text-xl text-ink/85 whitespace-pre-wrap text-left break-keep w-full">${escapeHTML(card.caseText)}</p>`;
+                }
+                contentEl.innerHTML = html || '<p class="text-ink/30">내용이 없습니다.</p>';
+
+            } else if (currentSide === 1) {
+                labelEl.textContent = 'DX';
+                contentEl.innerHTML = `<h2 class="text-3xl md:text-4xl font-bold text-dx break-keep text-center">${escapeHTML(card.diagnosis)}</h2>`;
+
+            } else if (currentSide === 2) {
+                labelEl.textContent = 'RX';
+                contentEl.innerHTML = `<p class="text-2xl md:text-3xl font-bold text-rx whitespace-pre-wrap text-center break-keep w-full">${escapeHTML(card.treatment)}</p>`;
+            }
+        }
+
+        function markCard(isWrong) {
+            if (!isWrong) {
+                sessionCorrect++;
+            }
+
+            const cardId = currentStudyList[currentIndex].id;
+            const realCard = cards.find(c => c.id === cardId);
+            if (realCard) {
+                realCard.isWrong = isWrong;
+                persistOne(realCard).catch(err => console.error('정오답 상태 저장 실패', err));
+            }
+
+            currentIndex++;
+
+            if (currentIndex >= currentStudyList.length) {
+                showResultScreen();
+            } else {
+                const cardElement = document.getElementById('flashcard');
+                cardElement.style.transition = 'none';
+                cardElement.style.transform = 'rotateY(0deg)';
+                renderCard();
+
+                void cardElement.offsetWidth;
+                cardElement.style.transition = 'transform 0.25s ease-in';
+            }
+        }
+
+        function showResultScreen() {
+            switchTab('result');
+
+            const wrongCount = sessionTotal - sessionCorrect;
+            const accuracy = sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0;
+
+            document.getElementById('result-total').textContent = sessionTotal;
+            document.getElementById('result-correct').textContent = sessionCorrect;
+            document.getElementById('result-wrong').textContent = wrongCount;
+            document.getElementById('result-accuracy').textContent = `${accuracy}%`;
+
+            const circle = document.getElementById('result-circle');
+            circle.style.background = `conic-gradient(#2B6E64 0%, #E7E5DE 0%)`;
+
+            setTimeout(() => {
+                circle.style.background = `conic-gradient(#2B6E64 ${accuracy}%, #E7E5DE ${accuracy}%)`;
+            }, 100);
+        }
+    </script>
+</body>
+</html>
