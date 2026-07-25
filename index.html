@@ -147,7 +147,7 @@
                         <label class="block text-sm font-medium text-ink/70">사진 첨부</label>
                     </div>
                     <input type="file" id="input-case-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-case/10 file:text-case hover:file:bg-case/20">
-                    <p class="mt-2 text-xs text-ink/40 font-mono">TIP: Ctrl+V로 클립보드 이미지를 바로 붙여넣을 수 있습니다. 이미지는 저장 공간 절약을 위해 자동으로 최적화됩니다.</p>
+                    <p class="mt-2 text-xs text-ink/40 font-mono">TIP: 위 증례 설명 칸을 길게 눌러 Paste를 선택하면(터치) 클립보드 이미지가 붙여넣어집니다. 키보드가 있다면 Ctrl+V도 됩니다. 이미지는 저장 공간 절약을 위해 자동으로 최적화됩니다.</p>
 
                     <div id="image-preview-container" class="hidden mt-3 relative inline-block border-2 border-dashed border-case/30 p-2 rounded bg-white">
                         <img id="image-preview" src="" alt="미리보기" class="max-h-48 rounded object-contain">
@@ -176,7 +176,11 @@
                     <h3 class="font-mono text-xs font-bold tracking-widest text-ink/70 mb-2 uppercase">암기 카드 — 이미지 스티커</h3>
                     <label class="block text-sm font-medium text-ink/70 mb-1">이미지 첨부 (표, 사진 등)</label>
                     <input type="file" id="input-occlusion-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ink/10 file:text-ink hover:file:bg-ink/20">
-                    <p class="mt-2 text-xs text-ink/40 font-mono">TIP: Ctrl+V로 붙여넣기 가능합니다. 이미지가 나타나면 손가락/펜슬로 가릴 부분을 드래그하세요. 여러 개 만들 수 있어요.</p>
+
+                    <input type="text" id="occlusion-paste-target" inputmode="none"
+                        class="w-full mt-3 p-4 border-2 border-dashed border-ink/25 rounded-md text-sm text-ink/40 text-center outline-none focus:border-ink/50 bg-white"
+                        placeholder="여기를 길게 눌러 '붙여넣기'를 선택하세요 (Paste)">
+                    <p class="mt-2 text-xs text-ink/40 font-mono">터치/펜슬 환경에서는 위 칸을 길게 눌러 붙여넣고, 키보드가 있다면 Ctrl+V도 됩니다. 이미지가 나타나면 손가락/펜슬로 가릴 부분을 드래그하세요. 여러 개 만들 수 있어요.</p>
 
                     <div id="occlusion-editor-wrap" class="hidden mt-3">
                         <div class="relative inline-block mx-auto rect-draw-surface select-none" id="occlusion-canvas-wrap">
@@ -202,7 +206,7 @@
 
                     <label class="block text-sm font-medium text-ink/70 mb-1 mt-3">이미지 (선택)</label>
                     <input type="file" id="input-basic-front-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ink/10 file:text-ink hover:file:bg-ink/20">
-                    <p class="mt-2 text-xs text-ink/40 font-mono">이미지를 넣은 뒤 드래그하면 그 부분만 가릴 수 있어요 (선택사항, 한 곳만 지정 가능). Ctrl+V 붙여넣기는 앞면이 비어있으면 앞면에, 채워져 있으면 뒷면에 들어갑니다.</p>
+                    <p class="mt-2 text-xs text-ink/40 font-mono">이미지를 넣은 뒤 드래그하면 그 부분만 가릴 수 있어요 (선택사항, 한 곳만 지정 가능). 붙여넣기는 위 텍스트 칸을 길게 눌러 Paste를 선택하거나(터치), Ctrl+V(키보드)로 할 수 있습니다 — 앞면이 비어있으면 앞면에, 채워져 있으면 뒷면에 들어갑니다.</p>
 
                     <div id="basic-front-editor-wrap" class="hidden mt-3">
                         <div class="relative inline-block mx-auto rect-draw-surface select-none" id="basic-canvas-wrap">
@@ -841,6 +845,12 @@
                             }
                         } else {
                             processImageFile(blob, (url) => { currentImageBase64 = url; showCasePreview(url); });
+                        }
+
+                        const pasteTargetEl = document.getElementById('occlusion-paste-target');
+                        if (pasteTargetEl) pasteTargetEl.value = '';
+                        if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                            document.activeElement.blur();
                         }
 
                         showToast('클립보드의 이미지를 붙여넣었습니다!');
