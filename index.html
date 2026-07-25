@@ -54,6 +54,9 @@
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+    /* 드래그로 사각형을 그리는 이미지 편집 영역: 스크롤/줌 제스처 대신 드래그를 우선시 */
+    .rect-draw-surface { touch-action: none; }
+
     @media (prefers-reduced-motion: reduce) {
         .flashcard, .flashcard.flip-in, .flashcard.flip-out { transition: none !important; }
     }
@@ -67,14 +70,17 @@
         <p class="text-sm text-ink/50 font-mono">불러오는 중…</p>
     </div>
 
-    <!-- 재사용 가능한 단원 목록 (DataList) -->
+    <!-- 재사용 가능한 자동완성 목록 -->
     <datalist id="category-list"></datalist>
+    <datalist id="subject-list"></datalist>
 
     <!-- 상단 네비게이션 바 -->
     <header class="bg-ink text-white shadow-md">
         <div class="max-w-3xl mx-auto px-4 py-3 flex justify-between items-center gap-2">
             <div>
-                <p class="font-mono text-[10px] tracking-[0.25em] uppercase text-white/40 leading-none mb-1">Case · Dx · Rx</p>
+                <button onclick="openContextModal()" class="font-mono text-[10px] tracking-[0.2em] uppercase text-white/40 hover:text-white/80 transition-colors leading-none mb-1 text-left">
+                    <span id="header-context-label">과목 없음 · 미분류</span> · 변경
+                </button>
                 <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight leading-none">Flashcard</h1>
             </div>
 
@@ -103,7 +109,7 @@
 
         <!-- ==================== 1. 카드 추가 화면 ==================== -->
         <section id="view-add" class="bg-white rounded-xl shadow-sm p-5 sm:p-6 mb-4 block">
-            <h2 class="text-lg sm:text-xl font-bold mb-4 text-ink border-b border-ink/10 pb-3 flex justify-between items-center flex-wrap gap-1">
+            <h2 class="text-lg sm:text-xl font-bold mb-3 text-ink border-b border-ink/10 pb-3 flex justify-between items-center flex-wrap gap-1">
                 새 카드 만들기
                 <span class="text-xs font-mono font-normal text-ink/45">
                     <span id="card-count">저장된 카드: 0장</span>
@@ -111,13 +117,27 @@
                 </span>
             </h2>
 
-            <div class="space-y-5">
-                <div class="bg-paper/70 p-4 rounded-lg border border-ink/10">
-                    <h3 class="font-bold text-ink text-sm mb-2">소속 단원 <span class="font-normal text-ink/40">(선택사항)</span></h3>
-                    <input type="text" id="input-category" list="category-list" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 focus:border-ink/30 outline-none" placeholder="단원명을 입력하거나 선택하세요 (기본: 미분류)">
-                </div>
+            <!-- 현재 과목 (상위 계층, 모달로 변경) -->
+            <div class="flex items-center justify-between bg-paper/70 border border-ink/10 rounded-lg px-4 py-2.5 mb-3">
+                <p class="text-sm text-ink/70">현재 과목 · <span class="font-bold text-ink" id="add-subject-label">과목 없음</span></p>
+                <button onclick="openContextModal()" class="text-xs font-bold text-case hover:underline shrink-0 ml-2">변경</button>
+            </div>
 
-                <!-- CASE -->
+            <!-- 단원 (카드마다 바로 입력/수정, 직전 카드 값을 그대로 유지) -->
+            <div class="mb-5">
+                <label class="block text-sm font-medium text-ink/70 mb-1">단원</label>
+                <input type="text" id="input-unit" list="category-list" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 focus:border-ink/30 outline-none" placeholder="단원명을 입력하세요 (기본: 미분류)">
+            </div>
+
+            <!-- 카드 유형 선택 -->
+            <div class="grid grid-cols-3 gap-2 mb-5" id="card-type-selector">
+                <button onclick="setCardType('case_dx_rx')" id="type-btn-case_dx_rx" class="py-2.5 px-1 rounded-lg text-xs sm:text-sm font-bold border-2 transition-colors border-ink bg-ink text-white">증례·진단·치료</button>
+                <button onclick="setCardType('occlusion')" id="type-btn-occlusion" class="py-2.5 px-1 rounded-lg text-xs sm:text-sm font-bold border-2 transition-colors border-ink/15 text-ink/60 hover:border-ink/30">암기 카드</button>
+                <button onclick="setCardType('basic')" id="type-btn-basic" class="py-2.5 px-1 rounded-lg text-xs sm:text-sm font-bold border-2 transition-colors border-ink/15 text-ink/60 hover:border-ink/30">2단 카드</button>
+            </div>
+
+            <!-- ---------- 폼 1: 증례-진단-치료 ---------- -->
+            <div id="form-case_dx_rx" class="space-y-5">
                 <div class="bg-case/5 p-4 rounded-lg border-l-4 border-case relative">
                     <h3 class="font-mono text-xs font-bold tracking-widest text-case mb-2 uppercase">CASE <span class="font-sans font-semibold text-ink/70 normal-case tracking-normal ml-1">— 증례</span></h3>
                     <label class="block text-sm font-medium text-ink/70 mb-1">증례 설명</label>
@@ -135,16 +155,74 @@
                     </div>
                 </div>
 
-                <!-- DX -->
                 <div class="bg-dx/5 p-4 rounded-lg border-l-4 border-dx">
                     <h3 class="font-mono text-xs font-bold tracking-widest text-dx mb-2 uppercase">DX <span class="font-sans font-semibold text-ink/70 normal-case tracking-normal ml-1">— 진단명</span></h3>
                     <input type="text" id="input-diagnosis" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-dx/40 focus:border-dx outline-none" placeholder="진단명을 입력하세요...">
                 </div>
 
-                <!-- RX -->
                 <div class="bg-rx/5 p-4 rounded-lg border-l-4 border-rx">
                     <h3 class="font-mono text-xs font-bold tracking-widest text-rx mb-2 uppercase">RX <span class="font-sans font-semibold text-ink/70 normal-case tracking-normal ml-1">— 치료법</span></h3>
                     <textarea id="input-treatment" rows="3" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-rx/40 focus:border-rx outline-none resize-none" placeholder="치료 방법이나 처방을 입력하세요..."></textarea>
+                </div>
+
+                <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-lg shadow transition-colors text-lg">
+                    카드 저장하기
+                </button>
+            </div>
+
+            <!-- ---------- 폼 2: 암기 카드 (이미지 스티커) ---------- -->
+            <div id="form-occlusion" class="hidden space-y-5">
+                <div class="bg-ink/5 p-4 rounded-lg border-l-4 border-ink">
+                    <h3 class="font-mono text-xs font-bold tracking-widest text-ink/70 mb-2 uppercase">암기 카드 — 이미지 스티커</h3>
+                    <label class="block text-sm font-medium text-ink/70 mb-1">이미지 첨부 (표, 사진 등)</label>
+                    <input type="file" id="input-occlusion-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ink/10 file:text-ink hover:file:bg-ink/20">
+                    <p class="mt-2 text-xs text-ink/40 font-mono">TIP: Ctrl+V로 붙여넣기 가능합니다. 이미지가 나타나면 손가락/펜슬로 가릴 부분을 드래그하세요. 여러 개 만들 수 있어요.</p>
+
+                    <div id="occlusion-editor-wrap" class="hidden mt-3">
+                        <div class="relative inline-block mx-auto rect-draw-surface select-none" id="occlusion-canvas-wrap">
+                            <img id="occlusion-editor-img" src="" class="block max-w-full max-h-[400px] rounded pointer-events-none" alt="편집 중 이미지" draggable="false">
+                        </div>
+                        <div class="flex justify-between items-center mt-2">
+                            <p class="text-xs text-ink/40 font-mono">스티커 <span id="occlusion-sticker-count">0</span>개 · 탭하면 삭제</p>
+                            <button onclick="clearOcclusionImage()" class="text-xs text-wrong font-semibold">이미지 초기화</button>
+                        </div>
+                    </div>
+                </div>
+
+                <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-lg shadow transition-colors text-lg">
+                    카드 저장하기
+                </button>
+            </div>
+
+            <!-- ---------- 폼 3: 2단 카드 (앞/뒤 + 선택적 가림막) ---------- -->
+            <div id="form-basic" class="hidden space-y-5">
+                <div class="bg-case/5 p-4 rounded-lg border-l-4 border-ink">
+                    <h3 class="font-mono text-xs font-bold tracking-widest text-ink/70 mb-2 uppercase">앞면</h3>
+                    <textarea id="input-basic-front-text" rows="2" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 outline-none resize-none" placeholder="질문 / 앞면 내용 (선택)"></textarea>
+
+                    <label class="block text-sm font-medium text-ink/70 mb-1 mt-3">이미지 (선택)</label>
+                    <input type="file" id="input-basic-front-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ink/10 file:text-ink hover:file:bg-ink/20">
+                    <p class="mt-2 text-xs text-ink/40 font-mono">이미지를 넣은 뒤 드래그하면 그 부분만 가릴 수 있어요 (선택사항, 한 곳만 지정 가능). Ctrl+V 붙여넣기는 앞면이 비어있으면 앞면에, 채워져 있으면 뒷면에 들어갑니다.</p>
+
+                    <div id="basic-front-editor-wrap" class="hidden mt-3">
+                        <div class="relative inline-block mx-auto rect-draw-surface select-none" id="basic-canvas-wrap">
+                            <img id="basic-front-editor-img" src="" class="block max-w-full max-h-[320px] rounded pointer-events-none" alt="앞면 편집 이미지" draggable="false">
+                        </div>
+                        <button onclick="clearBasicMask()" class="text-xs text-wrong font-semibold mt-2">가림막 지우기</button>
+                    </div>
+                </div>
+
+                <div class="bg-rx/5 p-4 rounded-lg border-l-4 border-ink">
+                    <h3 class="font-mono text-xs font-bold tracking-widest text-ink/70 mb-2 uppercase">뒷면</h3>
+                    <textarea id="input-basic-back-text" rows="2" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 outline-none resize-none" placeholder="답 / 뒷면 내용 (선택)"></textarea>
+
+                    <label class="block text-sm font-medium text-ink/70 mb-1 mt-3">이미지 (선택)</label>
+                    <input type="file" id="input-basic-back-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ink/10 file:text-ink hover:file:bg-ink/20">
+
+                    <div id="basic-back-preview-container" class="hidden mt-3 relative inline-block border-2 border-dashed border-ink/20 p-2 rounded bg-white">
+                        <img id="basic-back-preview" src="" alt="뒷면 미리보기" class="max-h-48 rounded object-contain">
+                        <button onclick="clearBasicBackImage()" class="absolute -top-2 -right-2 bg-wrong text-white rounded-full w-6 h-6 flex items-center justify-center hover:opacity-90 shadow-md text-sm leading-none font-bold" title="사진 삭제">×</button>
+                    </div>
                 </div>
 
                 <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-lg shadow transition-colors text-lg">
@@ -161,11 +239,19 @@
             </h2>
             <p class="text-xs font-mono text-ink/40 mb-4 mt-2">저장 방식: <span id="storage-mode-label">확인 중…</span></p>
 
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-ink/70 mb-1">단원별 모아보기 필터</label>
-                <select id="manage-filter-category" onchange="renderManageList()" class="w-full p-2 border border-ink/15 rounded-md focus:ring-2 focus:ring-case/40 focus:border-case outline-none bg-paper/50">
-                    <option value="all">모든 단원 보기</option>
-                </select>
+            <div class="grid grid-cols-2 gap-2 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-ink/70 mb-1">과목</label>
+                    <select id="manage-filter-subject" onchange="onManageSubjectChange()" class="w-full p-2 border border-ink/15 rounded-md focus:ring-2 focus:ring-case/40 focus:border-case outline-none bg-paper/50">
+                        <option value="all">모든 과목</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-ink/70 mb-1">단원</label>
+                    <select id="manage-filter-category" onchange="renderManageList()" class="w-full p-2 border border-ink/15 rounded-md focus:ring-2 focus:ring-case/40 focus:border-case outline-none bg-paper/50">
+                        <option value="all">모든 단원</option>
+                    </select>
+                </div>
             </div>
 
             <div id="manage-list-container" class="flex-1 overflow-y-auto space-y-3 pr-1 hide-scrollbar pb-4">
@@ -180,22 +266,28 @@
 
         <!-- ==================== 3. 학습 준비 화면 ==================== -->
         <section id="view-study-prep" class="hidden bg-white rounded-xl shadow-sm p-6 mb-4 flex-1 flex flex-col items-center justify-center">
-            <h2 class="text-2xl font-bold text-ink mb-6">어떤 단원을 공부할까요?</h2>
+            <h2 class="text-2xl font-bold text-ink mb-6">어떤 범위를 공부할까요?</h2>
 
-            <div class="w-full max-w-sm space-y-6">
+            <div class="w-full max-w-sm space-y-4">
                 <div>
-                    <label class="block text-sm font-bold text-ink/70 mb-2">학습할 단원 선택</label>
-                    <select id="study-category-select" class="w-full p-3 border-2 border-case/25 rounded-lg text-lg focus:ring-2 focus:ring-case/40 outline-none text-center appearance-none cursor-pointer bg-case/5">
+                    <label class="block text-sm font-bold text-ink/70 mb-2">과목</label>
+                    <select id="study-filter-subject" onchange="onStudySubjectChange()" class="w-full p-3 border-2 border-case/25 rounded-lg text-base focus:ring-2 focus:ring-case/40 outline-none text-center appearance-none cursor-pointer bg-case/5">
+                        <option value="all">전체 과목</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-ink/70 mb-2">단원</label>
+                    <select id="study-category-select" class="w-full p-3 border-2 border-case/25 rounded-lg text-base focus:ring-2 focus:ring-case/40 outline-none text-center appearance-none cursor-pointer bg-case/5">
                         <option value="all">전체 단원 (모든 카드)</option>
                     </select>
                 </div>
 
                 <div class="space-y-3 pt-4 border-t border-ink/10">
                     <button onclick="startStudy('all')" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-xl shadow transition-colors text-lg flex items-center justify-center">
-                        선택 단원 — 모두 학습
+                        선택 범위 — 모두 학습
                     </button>
                     <button onclick="startStudy('wrong')" class="w-full bg-wrong/5 text-wrong border-2 border-wrong/25 hover:bg-wrong/10 font-bold py-4 rounded-xl shadow-sm transition-colors text-lg flex items-center justify-center">
-                        선택 단원 — 오답만 학습
+                        선택 범위 — 오답만 학습
                     </button>
                 </div>
             </div>
@@ -242,7 +334,7 @@
                         </div>
                     </div>
 
-                    <div class="absolute bottom-4 text-ink/30 text-sm flex items-center">
+                    <div class="absolute bottom-4 text-ink/30 text-sm flex items-center" id="flip-hint">
                         클릭해서 다음 장 보기
                     </div>
                 </div>
@@ -307,6 +399,22 @@
 
     </main>
 
+    <!-- 현재 과목 변경 모달 -->
+    <div id="context-modal" class="hidden fixed inset-0 bg-ink/40 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+            <h3 class="text-lg font-bold text-ink mb-1">현재 과목 변경</h3>
+            <p class="text-xs text-ink/40 mb-4">여기서 설정한 과목으로 새 카드가 계속 저장됩니다. (단원은 추가 화면에서 바로 입력합니다)</p>
+            <div>
+                <label class="block text-sm font-medium text-ink/70 mb-1">과목</label>
+                <input type="text" id="context-subject-input" list="subject-list" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 outline-none" placeholder="예: 순환기내과 (비워두면 '과목 없음')">
+            </div>
+            <div class="flex gap-2 mt-6">
+                <button onclick="closeContextModal()" class="flex-1 py-3 rounded-lg text-ink/50 font-semibold hover:bg-paper transition-colors">취소</button>
+                <button onclick="applyContextChange()" class="flex-1 py-3 rounded-lg bg-ink text-white font-bold hover:bg-ink/90 transition-colors">적용</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 백업 파일 복원 모드 선택 모달 -->
     <div id="import-modal" class="hidden fixed inset-0 bg-ink/40 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
@@ -339,14 +447,29 @@
         let currentIndex = 0;
         let currentSide = 0;
         let isFlipping = false;
-        let currentImageBase64 = null;
 
+        // 카드 추가 폼 상태
+        let currentCardType = 'case_dx_rx'; // 'case_dx_rx' | 'occlusion' | 'basic'
+        let currentImageBase64 = null;       // 증례(case) 이미지
+        let occlusionEditorImage = null;     // 암기 카드 이미지
+        let draftOcclusions = [];            // [{id,x,y,w,h}] 편집 중인 스티커
+        let basicFrontEditorImage = null;    // 2단 카드 앞면 이미지
+        let basicBackImage = null;           // 2단 카드 뒷면 이미지
+        let draftBasicMask = null;           // {x,y,w,h} | null
+
+        // 현재 작업 위치: 과목은 모달로 상위에서 관리, 단원은 추가 화면의 입력창이 곧 상태값
+        let currentSubject = '';       // '' = 과목 없음
+
+        // 학습 중 상태
         let sessionTotal = 0;
         let sessionCorrect = 0;
+        let stickerRevealed = {};   // 암기 카드: 스티커 id -> boolean(벗겨짐)
+        let basicBackVisited = false; // 2단 카드: 이번 열람에서 뒷면을 본 적 있는지
 
         let pendingImportCards = null;
 
         const LS_KEY = 'medical_flashcards_data'; // 기존 버전과 동일한 키 (자동 이전을 위해 유지)
+        const CONTEXT_KEY = 'flashcard_current_context_v1';
         const DB_NAME = 'flashcard_studio_db';
         const DB_VERSION = 1;
         const STORE_NAME = 'cards';
@@ -508,34 +631,62 @@
             }
         }
 
+        // ==================== 현재 작업 위치 (과목/단원) 저장 ====================
+        function getUnitInputValue() {
+            const el = document.getElementById('input-unit');
+            return (el && el.value.trim()) ? el.value.trim() : '미분류';
+        }
+
+        function loadContext() {
+            let unit = '미분류';
+            try {
+                const raw = localStorage.getItem(CONTEXT_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    currentSubject = typeof parsed.subject === 'string' ? parsed.subject : '';
+                    unit = (typeof parsed.unit === 'string' && parsed.unit.trim()) ? parsed.unit.trim() : '미분류';
+                }
+            } catch (e) { /* 기본값 유지 */ }
+            document.getElementById('input-unit').value = unit;
+        }
+
+        function saveContext() {
+            try {
+                localStorage.setItem(CONTEXT_KEY, JSON.stringify({ subject: currentSubject, unit: getUnitInputValue() }));
+            } catch (e) { /* 저장 실패해도 앱은 계속 동작 */ }
+        }
+
+        function updateContextLabels() {
+            const label = `${currentSubject || '과목 없음'} · ${getUnitInputValue()}`;
+            const headerEl = document.getElementById('header-context-label');
+            const subjectEl = document.getElementById('add-subject-label');
+            if (headerEl) headerEl.textContent = label;
+            if (subjectEl) subjectEl.textContent = currentSubject || '과목 없음';
+        }
+
+        function openContextModal() {
+            document.getElementById('context-subject-input').value = currentSubject;
+            document.getElementById('context-modal').classList.remove('hidden');
+        }
+
+        function closeContextModal() {
+            document.getElementById('context-modal').classList.add('hidden');
+        }
+
+        function applyContextChange() {
+            currentSubject = document.getElementById('context-subject-input').value.trim();
+            saveContext();
+            updateContextLabels();
+            closeContextModal();
+            showToast('과목이 변경되었습니다.');
+        }
+
         // ==================== 유틸 ====================
         function generateId() {
             if (window.crypto && typeof crypto.randomUUID === 'function') {
                 return crypto.randomUUID();
             }
             return 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
-        }
-
-        function normalizeCard(raw, opts) {
-            opts = opts || {};
-            const c = raw || {};
-            let id = c.id;
-            if (opts.forceNewId || id === undefined || id === null || id === '') {
-                id = generateId();
-            } else {
-                id = String(id); // 과거 버전의 숫자 id 등을 문자열로 통일
-            }
-            let category = (typeof c.category === 'string') ? c.category.trim() : '';
-            if (!category) category = '미분류';
-            return {
-                id: id,
-                category: category,
-                caseText: typeof c.caseText === 'string' ? c.caseText : '',
-                caseImage: (typeof c.caseImage === 'string' && c.caseImage) ? c.caseImage : null,
-                diagnosis: typeof c.diagnosis === 'string' ? c.diagnosis : '',
-                treatment: typeof c.treatment === 'string' ? c.treatment : '',
-                isWrong: typeof c.isWrong === 'boolean' ? c.isWrong : true
-            };
         }
 
         function escapeHTML(str) {
@@ -548,14 +699,86 @@
                 .replace(/'/g, '&#39;');
         }
 
+        function normalizeCard(raw, opts) {
+            opts = opts || {};
+            const c = raw || {};
+            let id = c.id;
+            if (opts.forceNewId || id === undefined || id === null || id === '') {
+                id = generateId();
+            } else {
+                id = String(id); // 과거 버전의 숫자 id 등을 문자열로 통일
+            }
+
+            let category = (typeof c.category === 'string') ? c.category.trim() : '';
+            if (!category) category = '미분류';
+            let subject = (typeof c.subject === 'string') ? c.subject.trim() : '';
+
+            const cardType = ['case_dx_rx', 'occlusion', 'basic'].includes(c.cardType) ? c.cardType : 'case_dx_rx';
+
+            const base = {
+                id: id,
+                cardType: cardType,
+                subject: subject,
+                category: category,
+                isWrong: typeof c.isWrong === 'boolean' ? c.isWrong : true
+            };
+
+            if (cardType === 'occlusion') {
+                const occlusions = Array.isArray(c.occlusions)
+                    ? c.occlusions.filter(o => o && typeof o === 'object').map(o => ({
+                        id: (typeof o.id === 'string' && o.id) ? o.id : generateId(),
+                        x: Number(o.x) || 0,
+                        y: Number(o.y) || 0,
+                        w: Number(o.w) || 0,
+                        h: Number(o.h) || 0
+                    }))
+                    : [];
+                return Object.assign({}, base, {
+                    image: (typeof c.image === 'string' && c.image) ? c.image : null,
+                    occlusions: occlusions
+                });
+            }
+
+            if (cardType === 'basic') {
+                let mask = null;
+                if (c.mask && typeof c.mask === 'object') {
+                    mask = {
+                        x: Number(c.mask.x) || 0,
+                        y: Number(c.mask.y) || 0,
+                        w: Number(c.mask.w) || 0,
+                        h: Number(c.mask.h) || 0
+                    };
+                }
+                return Object.assign({}, base, {
+                    frontText: typeof c.frontText === 'string' ? c.frontText : '',
+                    frontImage: (typeof c.frontImage === 'string' && c.frontImage) ? c.frontImage : null,
+                    mask: mask,
+                    backText: typeof c.backText === 'string' ? c.backText : '',
+                    backImage: (typeof c.backImage === 'string' && c.backImage) ? c.backImage : null
+                });
+            }
+
+            // case_dx_rx (기본값 / 과거 데이터)
+            return Object.assign({}, base, {
+                caseText: typeof c.caseText === 'string' ? c.caseText : '',
+                caseImage: (typeof c.caseImage === 'string' && c.caseImage) ? c.caseImage : null,
+                diagnosis: typeof c.diagnosis === 'string' ? c.diagnosis : '',
+                treatment: typeof c.treatment === 'string' ? c.treatment : ''
+            });
+        }
+
         // ==================== 초기화 ====================
         async function init() {
+            loadContext();
+            updateContextLabels();
+            setCardType('case_dx_rx');
+
             await initStorage();
             await migrateLegacyLocalStorage();
             const loaded = await loadAllCards();
             cards = loaded.map(c => normalizeCard(c));
             updateCardCount();
-            updateCategoryDatalist();
+            updateGlobalDatalists();
 
             const modeLabelEl = document.getElementById('storage-mode-label');
             if (modeLabelEl) {
@@ -575,10 +798,27 @@
         document.addEventListener('DOMContentLoaded', () => {
             init();
 
-            const imageInput = document.getElementById('input-case-image');
-            imageInput.addEventListener('change', function (e) {
+            document.getElementById('input-unit').addEventListener('input', updateContextLabels);
+            document.getElementById('input-unit').addEventListener('change', saveContext);
+
+            document.getElementById('input-case-image').addEventListener('change', function (e) {
                 const file = e.target.files[0];
-                if (file) processImageFile(file);
+                if (file) processImageFile(file, (url) => { currentImageBase64 = url; showCasePreview(url); });
+            });
+
+            document.getElementById('input-occlusion-image').addEventListener('change', function (e) {
+                const file = e.target.files[0];
+                if (file) processImageFile(file, (url) => initOcclusionEditor(url));
+            });
+
+            document.getElementById('input-basic-front-image').addEventListener('change', function (e) {
+                const file = e.target.files[0];
+                if (file) processImageFile(file, (url) => initBasicFrontEditor(url));
+            });
+
+            document.getElementById('input-basic-back-image').addEventListener('change', function (e) {
+                const file = e.target.files[0];
+                if (file) processImageFile(file, (url) => { basicBackImage = url; showBasicBackPreview(url); });
             });
 
             document.addEventListener('paste', function (e) {
@@ -589,8 +829,20 @@
                     const item = items[index];
                     if (item.kind === 'file' && item.type.indexOf('image/') !== -1) {
                         const blob = item.getAsFile();
-                        processImageFile(blob);
                         e.preventDefault();
+
+                        if (currentCardType === 'occlusion') {
+                            processImageFile(blob, (url) => initOcclusionEditor(url));
+                        } else if (currentCardType === 'basic') {
+                            if (!basicFrontEditorImage) {
+                                processImageFile(blob, (url) => initBasicFrontEditor(url));
+                            } else {
+                                processImageFile(blob, (url) => { basicBackImage = url; showBasicBackPreview(url); });
+                            }
+                        } else {
+                            processImageFile(blob, (url) => { currentImageBase64 = url; showCasePreview(url); });
+                        }
+
                         showToast('클립보드의 이미지를 붙여넣었습니다!');
                         break;
                     }
@@ -617,7 +869,7 @@
         });
 
         // ==================== 이미지 처리 (자동 리사이즈/압축) ====================
-        function processImageFile(file) {
+        function processImageFile(file, onDone) {
             if (!file.type || file.type.indexOf('image/') !== 0) {
                 alert('이미지 파일만 첨부할 수 있습니다.');
                 return;
@@ -643,6 +895,7 @@
                         }
                     }
 
+                    let dataUrl;
                     try {
                         const canvas = document.createElement('canvas');
                         canvas.width = width;
@@ -651,14 +904,13 @@
                         ctx.fillStyle = '#FFFFFF';
                         ctx.fillRect(0, 0, width, height);
                         ctx.drawImage(img, 0, 0, width, height);
-                        currentImageBase64 = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+                        dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
                     } catch (err) {
                         console.warn('이미지 압축 실패, 원본을 사용합니다.', err);
-                        currentImageBase64 = e.target.result;
+                        dataUrl = e.target.result;
                     }
 
-                    document.getElementById('image-preview').src = currentImageBase64;
-                    document.getElementById('image-preview-container').classList.remove('hidden');
+                    onDone(dataUrl);
                 };
                 img.onerror = function () {
                     alert('이미지를 불러올 수 없습니다. 다른 파일을 시도해주세요.');
@@ -671,6 +923,181 @@
             reader.readAsDataURL(file);
         }
 
+        // ==================== 공용 드래그-사각형 그리기 ====================
+        // wrapEl: 좌표 기준이 되는 이미지가 들어있는 컨테이너 (포인터 이벤트 리스너 부착 대상)
+        // imgEl: 실제 <img> 엘리먼트 (렌더링된 박스 기준으로 좌표 계산)
+        // onRectDrawn({x,y,w,h}) : 이미지 대비 %로 정규화된 사각형이 확정되었을 때 호출
+        function makeDraggableRectOverlay(wrapEl, imgEl, onRectDrawn) {
+            let startX = 0, startY = 0, dragging = false, previewEl = null;
+
+            function getRelativePoint(evt) {
+                const rect = imgEl.getBoundingClientRect();
+                let x = evt.clientX - rect.left;
+                let y = evt.clientY - rect.top;
+                x = Math.max(0, Math.min(x, rect.width));
+                y = Math.max(0, Math.min(y, rect.height));
+                return { x: x, y: y, rectWidth: rect.width, rectHeight: rect.height };
+            }
+
+            wrapEl.addEventListener('pointerdown', function (e) {
+                if (e.target !== imgEl && e.target !== wrapEl) return; // 기존 스티커 위에서 시작하면 무시 (삭제 클릭과 충돌 방지)
+                e.preventDefault();
+                const p = getRelativePoint(e);
+                startX = p.x; startY = p.y; dragging = true;
+                previewEl = document.createElement('div');
+                previewEl.className = 'absolute bg-black pointer-events-none';
+                previewEl.style.left = startX + 'px';
+                previewEl.style.top = startY + 'px';
+                previewEl.style.width = '0px';
+                previewEl.style.height = '0px';
+                wrapEl.appendChild(previewEl);
+                if (wrapEl.setPointerCapture) {
+                    try { wrapEl.setPointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
+                }
+            });
+
+            wrapEl.addEventListener('pointermove', function (e) {
+                if (!dragging || !previewEl) return;
+                const p = getRelativePoint(e);
+                const left = Math.min(startX, p.x);
+                const top = Math.min(startY, p.y);
+                const w = Math.abs(p.x - startX);
+                const h = Math.abs(p.y - startY);
+                previewEl.style.left = left + 'px';
+                previewEl.style.top = top + 'px';
+                previewEl.style.width = w + 'px';
+                previewEl.style.height = h + 'px';
+            });
+
+            function finishDrag(e) {
+                if (!dragging) return;
+                dragging = false;
+                const p = getRelativePoint(e);
+                const rect = imgEl.getBoundingClientRect();
+                const left = Math.min(startX, p.x);
+                const top = Math.min(startY, p.y);
+                const w = Math.abs(p.x - startX);
+                const h = Math.abs(p.y - startY);
+                if (previewEl) { previewEl.remove(); previewEl = null; }
+                if (w < 8 || h < 8 || rect.width === 0 || rect.height === 0) return; // 너무 작은 드래그(=탭 실수)는 무시
+
+                onRectDrawn({
+                    x: +(left / rect.width * 100).toFixed(2),
+                    y: +(top / rect.height * 100).toFixed(2),
+                    w: +(w / rect.width * 100).toFixed(2),
+                    h: +(h / rect.height * 100).toFixed(2)
+                });
+            }
+
+            wrapEl.addEventListener('pointerup', finishDrag);
+            wrapEl.addEventListener('pointercancel', finishDrag);
+        }
+
+        function renderRectBox(container, rect, extraClass) {
+            const div = document.createElement('div');
+            div.className = 'absolute bg-black ' + (extraClass || '');
+            div.style.left = rect.x + '%';
+            div.style.top = rect.y + '%';
+            div.style.width = rect.w + '%';
+            div.style.height = rect.h + '%';
+            container.appendChild(div);
+            return div;
+        }
+
+        // ==================== 암기 카드 (스티커) 편집 ====================
+        function initOcclusionEditor(dataUrl) {
+            occlusionEditorImage = dataUrl;
+            draftOcclusions = [];
+            const img = document.getElementById('occlusion-editor-img');
+            img.src = dataUrl;
+            document.getElementById('occlusion-editor-wrap').classList.remove('hidden');
+            img.onload = function () {
+                const wrap = document.getElementById('occlusion-canvas-wrap');
+                renderOcclusionStickerEditor();
+                makeDraggableRectOverlay(wrap, img, function (rect) {
+                    draftOcclusions.push(Object.assign({ id: generateId() }, rect));
+                    renderOcclusionStickerEditor();
+                });
+            };
+        }
+
+        function renderOcclusionStickerEditor() {
+            const wrap = document.getElementById('occlusion-canvas-wrap');
+            wrap.querySelectorAll('.occlusion-sticker-editor').forEach(el => el.remove());
+            draftOcclusions.forEach(function (o) {
+                const div = renderRectBox(wrap, o, 'occlusion-sticker-editor cursor-pointer');
+                div.title = '탭하여 삭제';
+                div.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    draftOcclusions = draftOcclusions.filter(x => x.id !== o.id);
+                    renderOcclusionStickerEditor();
+                });
+            });
+            const countEl = document.getElementById('occlusion-sticker-count');
+            if (countEl) countEl.textContent = draftOcclusions.length;
+        }
+
+        function clearOcclusionImage() {
+            occlusionEditorImage = null;
+            draftOcclusions = [];
+            document.getElementById('input-occlusion-image').value = '';
+            document.getElementById('occlusion-editor-wrap').classList.add('hidden');
+            const wrap = document.getElementById('occlusion-canvas-wrap');
+            wrap.querySelectorAll('.occlusion-sticker-editor').forEach(el => el.remove());
+        }
+
+        // ==================== 2단 카드 편집 ====================
+        function initBasicFrontEditor(dataUrl) {
+            basicFrontEditorImage = dataUrl;
+            draftBasicMask = null;
+            const img = document.getElementById('basic-front-editor-img');
+            img.src = dataUrl;
+            document.getElementById('basic-front-editor-wrap').classList.remove('hidden');
+            img.onload = function () {
+                const wrap = document.getElementById('basic-canvas-wrap');
+                renderBasicMaskEditor();
+                makeDraggableRectOverlay(wrap, img, function (rect) {
+                    draftBasicMask = rect; // 한 개만 허용 (새로 그리면 교체)
+                    renderBasicMaskEditor();
+                });
+            };
+        }
+
+        function renderBasicMaskEditor() {
+            const wrap = document.getElementById('basic-canvas-wrap');
+            const existing = wrap.querySelector('.basic-mask-editor');
+            if (existing) existing.remove();
+            if (!draftBasicMask) return;
+            renderRectBox(wrap, draftBasicMask, 'basic-mask-editor');
+        }
+
+        function clearBasicMask() {
+            draftBasicMask = null;
+            renderBasicMaskEditor();
+        }
+
+        function showCasePreview(url) {
+            document.getElementById('image-preview').src = url;
+            document.getElementById('image-preview-container').classList.remove('hidden');
+        }
+
+        function clearImage() {
+            currentImageBase64 = null;
+            document.getElementById('input-case-image').value = '';
+            document.getElementById('image-preview-container').classList.add('hidden');
+        }
+
+        function showBasicBackPreview(url) {
+            document.getElementById('basic-back-preview').src = url;
+            document.getElementById('basic-back-preview-container').classList.remove('hidden');
+        }
+
+        function clearBasicBackImage() {
+            basicBackImage = null;
+            document.getElementById('input-basic-back-image').value = '';
+            document.getElementById('basic-back-preview-container').classList.add('hidden');
+        }
+
         // ==================== 카드 수/용량 표시 ====================
         function estimateStorageBytes() {
             let total = 0;
@@ -678,7 +1105,12 @@
                 total += (c.caseText || '').length;
                 total += (c.diagnosis || '').length;
                 total += (c.treatment || '').length;
-                if (c.caseImage) total += c.caseImage.length * 0.75; // base64 -> 대략적인 원본 바이트
+                total += (c.frontText || '').length;
+                total += (c.backText || '').length;
+                if (c.caseImage) total += c.caseImage.length * 0.75;
+                if (c.image) total += c.image.length * 0.75;
+                if (c.frontImage) total += c.frontImage.length * 0.75;
+                if (c.backImage) total += c.backImage.length * 0.75;
             }
             return total;
         }
@@ -691,18 +1123,41 @@
             if (el) el.textContent = label;
         }
 
+        // ==================== 과목/단원 조회 유틸 ====================
         function getUniqueCategories() {
             const categories = new Set(cards.map(c => c.category));
             return Array.from(categories).sort((a, b) => a.localeCompare(b, 'ko'));
         }
 
-        function updateCategoryDatalist() {
-            const list = document.getElementById('category-list');
-            list.innerHTML = '';
+        function getUniqueSubjects() {
+            const subs = new Set(cards.map(c => c.subject || '').filter(s => s !== ''));
+            return Array.from(subs).sort((a, b) => a.localeCompare(b, 'ko'));
+        }
+
+        function hasNoSubjectCards() {
+            return cards.some(c => (c.subject || '') === '');
+        }
+
+        function getUnitsForSubject(subject) {
+            const units = new Set(cards.filter(c => (c.subject || '') === (subject || '')).map(c => c.category));
+            return Array.from(units).sort((a, b) => a.localeCompare(b, 'ko'));
+        }
+
+        function updateGlobalDatalists() {
+            const catList = document.getElementById('category-list');
+            catList.innerHTML = '';
             getUniqueCategories().forEach(cat => {
                 const option = document.createElement('option');
                 option.value = cat;
-                list.appendChild(option);
+                catList.appendChild(option);
+            });
+
+            const subList = document.getElementById('subject-list');
+            subList.innerHTML = '';
+            getUniqueSubjects().forEach(sub => {
+                const option = document.createElement('option');
+                option.value = sub;
+                subList.appendChild(option);
             });
         }
 
@@ -728,7 +1183,7 @@
             try {
                 const payload = {
                     format: 'flashcard-backup',
-                    version: 1,
+                    version: 2,
                     exportedAt: new Date().toISOString(),
                     count: cards.length,
                     cards: cards
@@ -824,7 +1279,7 @@
                 await persistAll(cards);
 
                 updateCardCount();
-                updateCategoryDatalist();
+                updateGlobalDatalists();
                 switchTab('manage');
                 showToast(`복원 완료 (카드 ${importCards.length}장 ${mode === 'merge' ? '추가됨' : '으로 교체됨'})`);
             } catch (e) {
@@ -855,14 +1310,15 @@
 
             if (tab === 'add') {
                 document.getElementById('view-add').classList.remove('hidden');
-                updateCategoryDatalist();
+                updateGlobalDatalists();
+                updateContextLabels();
             } else if (tab === 'manage') {
                 document.getElementById('view-manage').classList.remove('hidden');
-                updateManageCategoryFilter();
+                updateManageFilters();
                 renderManageList();
             } else if (tab === 'study-prep') {
                 document.getElementById('view-study-prep').classList.remove('hidden');
-                updateStudyCategorySelect();
+                updateStudyFilters();
             } else if (tab === 'study') {
                 document.getElementById('view-study').classList.remove('hidden');
             } else if (tab === 'result') {
@@ -870,17 +1326,49 @@
             }
         }
 
+        // ==================== 카드 유형 선택 ====================
+        function setCardType(type) {
+            currentCardType = type;
+            ['case_dx_rx', 'occlusion', 'basic'].forEach(t => {
+                const btn = document.getElementById('type-btn-' + t);
+                const form = document.getElementById('form-' + t);
+                if (!btn || !form) return;
+                if (t === type) {
+                    btn.classList.add('border-ink', 'bg-ink', 'text-white');
+                    btn.classList.remove('border-ink/15', 'text-ink/60');
+                    form.classList.remove('hidden');
+                } else {
+                    btn.classList.remove('border-ink', 'bg-ink', 'text-white');
+                    btn.classList.add('border-ink/15', 'text-ink/60');
+                    form.classList.add('hidden');
+                }
+            });
+        }
+
         // ==================== 1. 카드 추가 기능 ====================
-        function clearImage() {
-            currentImageBase64 = null;
-            document.getElementById('input-case-image').value = '';
-            document.getElementById('image-preview-container').classList.add('hidden');
+        async function saveNewCard(newCard) {
+            cards.push(newCard);
+            try {
+                await persistOne(newCard);
+            } catch (e) {
+                cards.pop();
+                console.error(e);
+                alert('카드 저장에 실패했습니다: ' + (e && e.message ? e.message : e));
+                throw e;
+            }
+            updateCardCount();
+            updateGlobalDatalists();
+            saveContext();
+            showToast('카드가 성공적으로 저장되었습니다!');
         }
 
         async function addCard() {
-            let category = document.getElementById('input-category').value.trim();
-            if (!category) category = '미분류';
+            if (currentCardType === 'occlusion') return addOcclusionCard();
+            if (currentCardType === 'basic') return addBasicCard();
+            return addCaseDxRxCard();
+        }
 
+        async function addCaseDxRxCard() {
             const caseText = document.getElementById('input-case-text').value.trim();
             const diagnosis = document.getElementById('input-diagnosis').value.trim();
             const treatment = document.getElementById('input-treatment').value.trim();
@@ -891,7 +1379,9 @@
 
             const newCard = normalizeCard({
                 id: generateId(),
-                category: category,
+                cardType: 'case_dx_rx',
+                subject: currentSubject,
+                category: getUnitInputValue(),
                 caseText: caseText,
                 caseImage: currentImageBase64,
                 diagnosis: diagnosis,
@@ -899,66 +1389,178 @@
                 isWrong: true
             });
 
-            cards.push(newCard);
             try {
-                await persistOne(newCard);
-            } catch (e) {
-                cards.pop();
-                console.error(e);
-                alert('카드 저장에 실패했습니다: ' + (e && e.message ? e.message : e));
-                return;
-            }
-
-            updateCardCount();
-            updateCategoryDatalist();
+                await saveNewCard(newCard);
+            } catch (e) { return; }
 
             document.getElementById('input-case-text').value = '';
             document.getElementById('input-diagnosis').value = '';
             document.getElementById('input-treatment').value = '';
             clearImage();
-
             document.getElementById('input-case-text').focus();
-            showToast('카드가 성공적으로 저장되었습니다!');
+        }
+
+        async function addOcclusionCard() {
+            if (!occlusionEditorImage) return alert('이미지를 먼저 첨부해주세요.');
+
+            const newCard = normalizeCard({
+                id: generateId(),
+                cardType: 'occlusion',
+                subject: currentSubject,
+                category: getUnitInputValue(),
+                image: occlusionEditorImage,
+                occlusions: draftOcclusions,
+                isWrong: true
+            });
+
+            try {
+                await saveNewCard(newCard);
+            } catch (e) { return; }
+
+            clearOcclusionImage();
+        }
+
+        async function addBasicCard() {
+            const frontText = document.getElementById('input-basic-front-text').value.trim();
+            const backText = document.getElementById('input-basic-back-text').value.trim();
+
+            if (!frontText && !basicFrontEditorImage) return alert('앞면에 텍스트나 이미지 중 하나는 필요합니다.');
+            if (!backText && !basicBackImage) return alert('뒷면에 텍스트나 이미지 중 하나는 필요합니다.');
+
+            const newCard = normalizeCard({
+                id: generateId(),
+                cardType: 'basic',
+                subject: currentSubject,
+                category: getUnitInputValue(),
+                frontText: frontText,
+                frontImage: basicFrontEditorImage,
+                mask: draftBasicMask,
+                backText: backText,
+                backImage: basicBackImage,
+                isWrong: true
+            });
+
+            try {
+                await saveNewCard(newCard);
+            } catch (e) { return; }
+
+            document.getElementById('input-basic-front-text').value = '';
+            document.getElementById('input-basic-back-text').value = '';
+            basicFrontEditorImage = null;
+            clearBasicMask();
+            document.getElementById('basic-front-editor-wrap').classList.add('hidden');
+            document.getElementById('input-basic-front-image').value = '';
+            clearBasicBackImage();
         }
 
         // ==================== 2. 카드 관리(분류) 기능 ====================
-        function updateManageCategoryFilter() {
-            const filterSelect = document.getElementById('manage-filter-category');
-            const currentValue = filterSelect.value;
-
-            filterSelect.innerHTML = '<option value="all">모든 단원 보기</option>';
-            const categories = getUniqueCategories();
-            categories.forEach(cat => {
+        function populateSubjectSelect(selectEl, allLabel) {
+            const currentValue = selectEl.value;
+            selectEl.innerHTML = `<option value="all">${allLabel}</option>`;
+            if (hasNoSubjectCards()) {
                 const opt = document.createElement('option');
-                opt.value = cat;
-                opt.textContent = cat;
-                filterSelect.appendChild(opt);
+                opt.value = '__none__';
+                opt.textContent = '과목 없음';
+                selectEl.appendChild(opt);
+            }
+            getUniqueSubjects().forEach(sub => {
+                const opt = document.createElement('option');
+                opt.value = sub;
+                opt.textContent = sub;
+                selectEl.appendChild(opt);
+            });
+            const values = Array.from(selectEl.options).map(o => o.value);
+            selectEl.value = values.includes(currentValue) ? currentValue : 'all';
+        }
+
+        function populateUnitSelect(selectEl, subjectFilterValue, allLabel, withCounts) {
+            const currentValue = selectEl.value;
+            selectEl.innerHTML = `<option value="all">${allLabel}</option>`;
+
+            let relevantCards = cards;
+            if (subjectFilterValue === '__none__') {
+                relevantCards = cards.filter(c => (c.subject || '') === '');
+            } else if (subjectFilterValue && subjectFilterValue !== 'all') {
+                relevantCards = cards.filter(c => c.subject === subjectFilterValue);
+            }
+            const units = Array.from(new Set(relevantCards.map(c => c.category))).sort((a, b) => a.localeCompare(b, 'ko'));
+
+            units.forEach(unit => {
+                const opt = document.createElement('option');
+                opt.value = unit;
+                if (withCounts) {
+                    const count = relevantCards.filter(c => c.category === unit).length;
+                    opt.textContent = `${unit} (${count}장)`;
+                } else {
+                    opt.textContent = unit;
+                }
+                selectEl.appendChild(opt);
             });
 
-            if (categories.includes(currentValue) || currentValue === 'all') {
-                filterSelect.value = currentValue;
-            } else {
-                filterSelect.value = 'all';
+            const values = Array.from(selectEl.options).map(o => o.value);
+            selectEl.value = values.includes(currentValue) ? currentValue : 'all';
+        }
+
+        function updateManageFilters() {
+            populateSubjectSelect(document.getElementById('manage-filter-subject'), '모든 과목');
+            populateUnitSelect(document.getElementById('manage-filter-category'), document.getElementById('manage-filter-subject').value, '모든 단원', false);
+        }
+
+        function onManageSubjectChange() {
+            populateUnitSelect(document.getElementById('manage-filter-category'), document.getElementById('manage-filter-subject').value, '모든 단원', false);
+            renderManageList();
+        }
+
+        function getCardSummary(card) {
+            if (card.cardType === 'occlusion') {
+                return {
+                    title: `암기 카드 (스티커 ${card.occlusions.length}개)`,
+                    subtitle: '이미지 기반 암기 카드'
+                };
             }
+            if (card.cardType === 'basic') {
+                const title = card.frontText || (card.frontImage ? '(이미지 카드)' : '(빈 앞면)');
+                const subtitle = card.backText || (card.backImage ? '(이미지 답)' : '(빈 뒷면)');
+                return { title: title, subtitle: subtitle };
+            }
+            const rawCase = card.caseText || (card.caseImage ? '(사진 증례)' : '');
+            return { title: card.diagnosis || '(진단명 없음)', subtitle: rawCase };
+        }
+
+        function cardTypeBadge(cardType) {
+            const map = {
+                case_dx_rx: { label: '증례', cls: 'text-case border-case/40' },
+                occlusion: { label: '암기', cls: 'text-ink/70 border-ink/30' },
+                basic: { label: '2단', cls: 'text-rx border-rx/40' }
+            };
+            const meta = map[cardType] || map.case_dx_rx;
+            return `<span class="text-[10px] font-mono font-bold border rounded px-1.5 py-0.5 ${meta.cls}">${meta.label}</span>`;
         }
 
         function renderManageList() {
             const container = document.getElementById('manage-list-container');
+            const filterSubject = document.getElementById('manage-filter-subject').value;
             const filterCategory = document.getElementById('manage-filter-category').value;
 
             container.innerHTML = '';
 
             let filteredCards = cards;
+            if (filterSubject === '__none__') {
+                filteredCards = filteredCards.filter(c => (c.subject || '') === '');
+            } else if (filterSubject !== 'all') {
+                filteredCards = filteredCards.filter(c => c.subject === filterSubject);
+            }
             if (filterCategory !== 'all') {
-                filteredCards = cards.filter(c => c.category === filterCategory);
+                filteredCards = filteredCards.filter(c => c.category === filterCategory);
             }
 
             filteredCards.slice().reverse().forEach(card => {
                 const item = document.createElement('div');
                 item.className = "p-4 border border-ink/10 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white hover:bg-paper/60 transition-colors";
 
-                const rawCase = card.caseText || (card.caseImage ? '(사진 증례)' : '');
-                const shortCase = rawCase.length > 34 ? rawCase.substring(0, 34) + '…' : rawCase;
+                const summary = getCardSummary(card);
+                const shortSubtitle = summary.subtitle.length > 34 ? summary.subtitle.substring(0, 34) + '…' : summary.subtitle;
+                const subjectUnitLabel = `${card.subject || '과목없음'} › ${card.category}`;
                 const statusTag = card.isWrong
                     ? '<span class="text-[10px] font-mono font-bold text-wrong border border-wrong/40 rounded px-1.5 py-0.5">오답</span>'
                     : '<span class="text-[10px] font-mono font-bold text-correct border border-correct/40 rounded px-1.5 py-0.5">정답</span>';
@@ -966,11 +1568,12 @@
                 item.innerHTML = `
                     <div class="flex-1 min-w-0 w-full">
                         <div class="flex items-center gap-2 mb-1 flex-wrap">
-                            <span class="text-[11px] font-mono font-bold px-2 py-0.5 bg-ink/5 text-ink/70 rounded truncate max-w-[120px]" title="${escapeHTML(card.category)}">${escapeHTML(card.category)}</span>
-                            <h4 class="font-bold text-ink truncate">${escapeHTML(card.diagnosis)}</h4>
+                            ${cardTypeBadge(card.cardType)}
+                            <span class="text-[11px] font-mono font-bold px-2 py-0.5 bg-ink/5 text-ink/70 rounded truncate max-w-[160px]" title="${escapeHTML(subjectUnitLabel)}">${escapeHTML(subjectUnitLabel)}</span>
                             ${statusTag}
                         </div>
-                        <p class="text-sm text-ink/50 truncate">${escapeHTML(shortCase)}</p>
+                        <h4 class="font-bold text-ink truncate">${escapeHTML(summary.title)}</h4>
+                        <p class="text-sm text-ink/50 truncate">${escapeHTML(shortSubtitle)}</p>
                     </div>
                     <div class="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
                         <input type="text" list="category-list" value="${escapeHTML(card.category)}"
@@ -987,7 +1590,7 @@
                 if (cards.length === 0) {
                     container.innerHTML = '<p class="text-center text-ink/40 py-16">아직 만든 카드가 없습니다.<br>‘추가’ 탭에서 첫 카드를 만들어보세요.</p>';
                 } else {
-                    container.innerHTML = '<p class="text-center text-ink/40 py-16">이 단원에는 카드가 없습니다.</p>';
+                    container.innerHTML = '<p class="text-center text-ink/40 py-16">이 조건에는 카드가 없습니다.</p>';
                 }
             }
         }
@@ -1007,8 +1610,8 @@
                 renderManageList();
                 return;
             }
-            updateManageCategoryFilter();
-            updateCategoryDatalist();
+            updateManageFilters();
+            updateGlobalDatalists();
             showToast('단원이 변경되었습니다.');
         }
 
@@ -1024,10 +1627,10 @@
                 console.error(e);
                 alert('삭제에 실패했습니다.');
             }
-            updateManageCategoryFilter();
+            updateManageFilters();
             renderManageList();
             updateCardCount();
-            updateCategoryDatalist();
+            updateGlobalDatalists();
         }
 
         async function resetAllData() {
@@ -1046,35 +1649,40 @@
                 console.error(e);
             }
             updateCardCount();
-            updateCategoryDatalist();
-            updateManageCategoryFilter();
+            updateGlobalDatalists();
+            updateManageFilters();
             renderManageList();
             showToast('모든 카드가 삭제되었습니다.');
         }
 
         // ==================== 3. 학습 기능 및 결과화면 ====================
-        function updateStudyCategorySelect() {
-            const select = document.getElementById('study-category-select');
-            select.innerHTML = '<option value="all">전체 단원 (모든 카드)</option>';
+        function updateStudyFilters() {
+            populateSubjectSelect(document.getElementById('study-filter-subject'), '전체 과목');
+            populateUnitSelect(document.getElementById('study-category-select'), document.getElementById('study-filter-subject').value, '전체 단원 (모든 카드)', true);
+        }
 
-            getUniqueCategories().forEach(cat => {
-                const opt = document.createElement('option');
-                opt.value = cat;
-                const count = cards.filter(c => c.category === cat).length;
-                opt.textContent = `${cat} (${count}장)`;
-                select.appendChild(opt);
-            });
+        function onStudySubjectChange() {
+            populateUnitSelect(document.getElementById('study-category-select'), document.getElementById('study-filter-subject').value, '전체 단원 (모든 카드)', true);
         }
 
         function startStudy(mode) {
-            const targetCategory = document.getElementById('study-category-select').value;
+            const filterSubject = document.getElementById('study-filter-subject').value;
+            const filterUnit = document.getElementById('study-category-select').value;
 
             let targetCards = cards;
-            let targetLabel = '전체 단원';
+            let targetLabel = '전체 범위';
 
-            if (targetCategory !== 'all') {
-                targetCards = cards.filter(c => c.category === targetCategory);
-                targetLabel = targetCategory;
+            if (filterSubject === '__none__') {
+                targetCards = targetCards.filter(c => (c.subject || '') === '');
+                targetLabel = '과목 없음';
+            } else if (filterSubject !== 'all') {
+                targetCards = targetCards.filter(c => c.subject === filterSubject);
+                targetLabel = filterSubject;
+            }
+
+            if (filterUnit !== 'all') {
+                targetCards = targetCards.filter(c => c.category === filterUnit);
+                targetLabel = targetLabel === '전체 범위' ? filterUnit : `${targetLabel} › ${filterUnit}`;
             }
 
             if (mode === 'wrong') {
@@ -1096,7 +1704,7 @@
                 document.getElementById('view-empty').classList.remove('hidden');
                 if (mode === 'wrong') {
                     document.getElementById('empty-title').textContent = '틀린 카드가 없습니다!';
-                    document.getElementById('empty-desc').textContent = '선택한 단원에 오답이 없습니다. 훌륭합니다!';
+                    document.getElementById('empty-desc').textContent = '선택한 범위에 오답이 없습니다. 훌륭합니다!';
                 } else {
                     document.getElementById('empty-title').textContent = '학습할 카드가 없습니다.';
                     document.getElementById('empty-desc').textContent = '조건에 맞는 카드가 없거나 아직 추가되지 않았습니다.';
@@ -1132,6 +1740,8 @@
 
         function renderCard() {
             currentSide = 0;
+            stickerRevealed = {};       // 새 카드를 열 때마다 스티커는 항상 다시 가려진 상태로 시작
+            basicBackVisited = false;   // 2단 카드의 가림막도 새로 열 때마다 다시 가려짐
             updateCardUI();
             updateProgress();
         }
@@ -1140,7 +1750,15 @@
             document.getElementById('study-progress').textContent = `${currentIndex + 1} / ${currentStudyList.length}`;
         }
 
+        function sideCountForType(cardType) {
+            if (cardType === 'basic') return 2;
+            if (cardType === 'occlusion') return 1;
+            return 3;
+        }
+
         function flipCard() {
+            const card = currentStudyList[currentIndex];
+            if (!card || card.cardType === 'occlusion') return; // 암기 카드는 뒤집기 동작이 없음 (스티커를 개별로 클릭)
             if (isFlipping) return;
             isFlipping = true;
 
@@ -1148,7 +1766,9 @@
             cardElement.classList.add('flip-out');
 
             setTimeout(() => {
-                currentSide = (currentSide + 1) % 3;
+                const sideCount = sideCountForType(card.cardType);
+                currentSide = (currentSide + 1) % sideCount;
+                if (card.cardType === 'basic' && currentSide === 1) basicBackVisited = true;
                 updateCardUI();
 
                 cardElement.classList.remove('flip-out');
@@ -1161,12 +1781,36 @@
             }, 250);
         }
 
+        function toggleSticker(id) {
+            stickerRevealed[id] = !stickerRevealed[id];
+            updateCardUI();
+        }
+
+        function updateSideIndicators(count, activeIndex, colorList) {
+            const wrap = document.getElementById('side-indicators');
+            wrap.innerHTML = '';
+            if (count <= 1) return; // 암기 카드처럼 '면' 개념이 없으면 표시하지 않음
+            for (let i = 0; i < count; i++) {
+                const dot = document.createElement('div');
+                const color = colorList[i] || 'ink';
+                dot.className = i === activeIndex ? `w-2 h-2 rounded-full bg-${color}` : 'w-2 h-2 rounded-full bg-ink/15';
+                wrap.appendChild(dot);
+            }
+        }
+
         function updateCardUI() {
             const card = currentStudyList[currentIndex];
+            const flashcardEl = document.getElementById('flashcard');
+            flashcardEl.classList.remove('border-t-case', 'border-t-dx', 'border-t-rx', 'border-t-ink');
+
+            if (card.cardType === 'occlusion') return updateCardUI_occlusion(card, flashcardEl);
+            if (card.cardType === 'basic') return updateCardUI_basic(card, flashcardEl);
+            return updateCardUI_caseDxRx(card, flashcardEl);
+        }
+
+        function updateCardUI_caseDxRx(card, flashcardEl) {
             const contentEl = document.getElementById('card-content');
             const labelEl = document.getElementById('card-label');
-            const flashcardEl = document.getElementById('flashcard');
-            const indicators = document.getElementById('side-indicators').children;
 
             const sides = [
                 { tag: 'CASE', color: 'case' },
@@ -1175,20 +1819,14 @@
             ];
             const active = sides[currentSide];
 
-            flashcardEl.classList.remove('border-t-case', 'border-t-dx', 'border-t-rx');
             flashcardEl.classList.add('border-t-' + active.color);
-
-            for (let i = 0; i < 3; i++) {
-                indicators[i].className = i === currentSide
-                    ? `w-2 h-2 rounded-full bg-${sides[i].color}`
-                    : 'w-2 h-2 rounded-full bg-ink/15';
-            }
+            updateSideIndicators(3, currentSide, ['case', 'dx', 'rx']);
+            document.getElementById('flip-hint').textContent = '클릭해서 다음 장 보기';
 
             labelEl.className = `absolute top-5 left-5 font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-${active.color}/10 text-${active.color} max-w-[55%] truncate`;
 
             if (currentSide === 0) {
                 labelEl.textContent = `CASE · ${card.category}`;
-
                 let html = '';
                 if (card.caseImage) {
                     html += `<img src="${card.caseImage}" class="max-h-56 object-contain mb-4 rounded mx-auto shadow-sm" alt="증례 이미지">`;
@@ -1197,14 +1835,74 @@
                     html += `<p class="text-lg md:text-xl text-ink/85 whitespace-pre-wrap text-left break-keep w-full">${escapeHTML(card.caseText)}</p>`;
                 }
                 contentEl.innerHTML = html || '<p class="text-ink/30">내용이 없습니다.</p>';
-
             } else if (currentSide === 1) {
                 labelEl.textContent = 'DX';
                 contentEl.innerHTML = `<h2 class="text-3xl md:text-4xl font-bold text-dx break-keep text-center">${escapeHTML(card.diagnosis)}</h2>`;
-
             } else if (currentSide === 2) {
                 labelEl.textContent = 'RX';
                 contentEl.innerHTML = `<p class="text-2xl md:text-3xl font-bold text-rx whitespace-pre-wrap text-center break-keep w-full">${escapeHTML(card.treatment)}</p>`;
+            }
+        }
+
+        function updateCardUI_occlusion(card, flashcardEl) {
+            const contentEl = document.getElementById('card-content');
+            const labelEl = document.getElementById('card-label');
+
+            flashcardEl.classList.add('border-t-ink');
+            updateSideIndicators(1, 0, []);
+            document.getElementById('flip-hint').textContent = '스티커를 탭해서 확인하기';
+
+            labelEl.className = 'absolute top-5 left-5 font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-ink/10 text-ink/70 max-w-[55%] truncate';
+            labelEl.textContent = `암기 · ${card.category}`;
+
+            const stickersHtml = card.occlusions.map(o => {
+                const revealed = !!stickerRevealed[o.id];
+                return `<div onclick="event.stopPropagation(); toggleSticker('${o.id}')"
+                    class="absolute cursor-pointer transition-colors ${revealed ? 'bg-transparent' : 'bg-black'}"
+                    style="left:${o.x}%; top:${o.y}%; width:${o.w}%; height:${o.h}%;"></div>`;
+            }).join('');
+
+            contentEl.innerHTML = card.image
+                ? `<div class="relative inline-block mx-auto">
+                        <img src="${card.image}" class="block max-w-full max-h-[320px] rounded mx-auto" alt="암기 카드 이미지">
+                        ${stickersHtml}
+                   </div>`
+                : '<p class="text-ink/30">이미지가 없습니다.</p>';
+        }
+
+        function updateCardUI_basic(card, flashcardEl) {
+            const contentEl = document.getElementById('card-content');
+            const labelEl = document.getElementById('card-label');
+
+            flashcardEl.classList.add('border-t-ink');
+            updateSideIndicators(2, currentSide, ['ink', 'ink']);
+            document.getElementById('flip-hint').textContent = '클릭해서 뒤집기';
+
+            labelEl.className = 'absolute top-5 left-5 font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-ink/10 text-ink/70 max-w-[55%] truncate';
+
+            if (currentSide === 0) {
+                labelEl.textContent = `앞면 · ${card.category}`;
+                let imageHtml = '';
+                if (card.frontImage) {
+                    const showMask = card.mask && !basicBackVisited;
+                    const maskHtml = showMask
+                        ? `<div class="absolute bg-black" style="left:${card.mask.x}%; top:${card.mask.y}%; width:${card.mask.w}%; height:${card.mask.h}%;"></div>`
+                        : '';
+                    imageHtml = `<div class="relative inline-block mx-auto mb-3">
+                            <img src="${card.frontImage}" class="block max-w-full max-h-[260px] rounded mx-auto" alt="앞면 이미지">
+                            ${maskHtml}
+                        </div>`;
+                }
+                const textHtml = card.frontText ? `<p class="text-lg md:text-xl text-ink/85 whitespace-pre-wrap text-left break-keep w-full">${escapeHTML(card.frontText)}</p>` : '';
+                contentEl.innerHTML = imageHtml + textHtml || '<p class="text-ink/30">내용이 없습니다.</p>';
+            } else {
+                labelEl.textContent = '뒷면';
+                let imageHtml = '';
+                if (card.backImage) {
+                    imageHtml = `<img src="${card.backImage}" class="max-h-56 object-contain mb-3 rounded mx-auto shadow-sm" alt="뒷면 이미지">`;
+                }
+                const textHtml = card.backText ? `<p class="text-lg md:text-xl text-ink/85 whitespace-pre-wrap text-left break-keep w-full">${escapeHTML(card.backText)}</p>` : '';
+                contentEl.innerHTML = imageHtml + textHtml || '<p class="text-ink/30">내용이 없습니다.</p>';
             }
         }
 
