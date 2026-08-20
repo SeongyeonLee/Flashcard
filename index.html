@@ -10,13 +10,13 @@
     theme: {
       extend: {
         colors: {
-          ink: '#1C2B39',
-          paper: '#F3F4F1',
-          case: '#2B6E64',
-          dx: '#B46A21',
-          rx: '#7D3C52',
-          wrong: '#B23A2E',
-          correct: '#2F7D5C'
+          ink: '#16212B',
+          paper: '#E7ECEE',
+          case: '#1B6B78',
+          dx: '#A96214',
+          rx: '#743F63',
+          wrong: '#A8342A',
+          correct: '#2A6B4F'
         },
         fontFamily: {
           sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'Malgun Gothic', 'sans-serif'],
@@ -33,23 +33,58 @@
 <style>
     body {
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Malgun Gothic', 'Noto Sans KR', sans-serif;
-        background-color: #F3F4F1;
+        background-color: #E7ECEE;
+        /* 아주 옅은 모눈: 차트 용지 느낌 */
+        background-image:
+            linear-gradient(rgba(22,33,43,0.028) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(22,33,43,0.028) 1px, transparent 1px);
+        background-size: 22px 22px;
     }
 
-    .card-container { perspective: 1000px; }
+    /* 공통 타이포 디테일 */
+    .eyebrow {
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        font-weight: 600;
+    }
+    /* 한글이 섞이는 라벨은 자간을 좁혀야 읽기 좋습니다 */
+    .eyebrow-ko {
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        font-weight: 700;
+    }
+
+    .card-container { perspective: 1200px; }
 
     .flashcard {
         transition: transform 0.25s ease-in;
         transform-style: preserve-3d;
-        box-shadow: 0 10px 25px -5px rgba(28,43,57,0.10), 0 8px 10px -6px rgba(28,43,57,0.08);
+        box-shadow:
+            0 1px 2px rgba(22,33,43,0.05),
+            0 12px 28px -12px rgba(22,33,43,0.22),
+            0 2px 6px -2px rgba(22,33,43,0.08);
     }
     .flashcard.flip-out { transform: rotateY(90deg); }
     .flashcard.flip-in { transition: transform 0.25s ease-out; transform: rotateY(0deg); }
 
-    /* Signature texture: faint ruled lines, like a real index card */
-    .rule-lines {
-        background-image: repeating-linear-gradient(to bottom, transparent, transparent 27px, rgba(28,43,57,0.05) 28px);
+    /* 시그니처: 차트 바인더의 색인 탭 */
+    .chart-tab {
+        height: 7px;
+        border-radius: 3px 3px 0 0;
+        transition: height 0.18s ease, opacity 0.18s ease;
+        opacity: 0.28;
     }
+    .chart-tab.is-active {
+        height: 13px;
+        opacity: 1;
+    }
+
+    /* 헤더 아래 색인 스펙트럼 */
+    .tab-spectrum { height: 3px; display: flex; }
+    .tab-spectrum > i { flex: 1; display: block; }
 
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -57,8 +92,18 @@
     /* 드래그로 사각형을 그리는 이미지 편집 영역: 스크롤/줌 제스처 대신 드래그를 우선시 */
     .rect-draw-surface { touch-action: none; }
 
+    /* 붙여넣기 안내 칸: 실제로 눌러야 할 곳임을 드러냄 */
+    .paste-slot {
+        background-image: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(231,236,238,0.55));
+        transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+    }
+    .paste-slot:focus { color: #16212B; }
+
+    /* 키보드 포커스가 항상 보이도록 */
+    :focus-visible { outline: 2px solid #1B6B78; outline-offset: 2px; }
+
     @media (prefers-reduced-motion: reduce) {
-        .flashcard, .flashcard.flip-in, .flashcard.flip-out { transition: none !important; }
+        .flashcard, .flashcard.flip-in, .flashcard.flip-out, .chart-tab { transition: none !important; }
     }
 </style>
 </head>
@@ -66,7 +111,7 @@
 
     <!-- 로딩 오버레이 -->
     <div id="loading-overlay" class="fixed inset-0 bg-paper z-[100] flex flex-col items-center justify-center">
-        <div class="w-8 h-8 border-2 border-ink/20 border-t-ink rounded-full animate-spin mb-3"></div>
+        <div class="w-8 h-8 border-2 border-ink/15 border-t-case rounded-full animate-spin mb-3"></div>
         <p class="text-sm text-ink/50 font-mono">불러오는 중…</p>
     </div>
 
@@ -75,32 +120,37 @@
     <datalist id="subject-list"></datalist>
 
     <!-- 상단 네비게이션 바 -->
-    <header class="bg-ink text-white shadow-md">
-        <div class="max-w-3xl mx-auto px-4 py-3 flex justify-between items-center gap-2">
-            <div>
-                <button onclick="openContextModal()" class="font-mono text-[10px] tracking-[0.2em] uppercase text-white/40 hover:text-white/80 transition-colors leading-none mb-1 text-left">
-                    <span id="header-context-label">과목 없음 · 미분류</span> · 변경
+    <header class="bg-ink text-white shadow-lg relative z-20">
+        <div class="max-w-3xl mx-auto px-4 pt-3 pb-2.5 flex justify-between items-center gap-3">
+            <div class="min-w-0">
+                <h1 class="text-lg sm:text-xl font-extrabold tracking-[-0.02em] leading-none mb-1.5">Flashcard</h1>
+                <button onclick="openContextModal()" class="group flex items-center gap-1.5 max-w-full" title="과목 변경">
+                    <span class="eyebrow-ko text-white/50 group-hover:text-white/85 transition-colors truncate" id="header-context-label">과목 없음 · 미분류</span>
+                    <span class="eyebrow text-white/25 group-hover:text-white/60 transition-colors shrink-0">변경</span>
                 </button>
-                <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight leading-none">Flashcard</h1>
             </div>
 
-            <div class="flex items-center gap-1.5">
-                <button onclick="exportData()" class="px-2.5 sm:px-3 py-1.5 hover:bg-white/10 rounded-md text-sm font-semibold transition-colors" title="기기에 파일로 백업">백업</button>
-                <button onclick="document.getElementById('import-file').click()" class="px-2.5 sm:px-3 py-1.5 hover:bg-white/10 rounded-md text-sm font-semibold transition-colors" title="파일에서 데이터 불러오기">복원</button>
+            <div class="flex items-center gap-1.5 shrink-0">
+                <button onclick="exportData()" class="px-3 py-2 border border-white/15 hover:bg-white/10 hover:border-white/30 rounded-lg text-xs font-bold tracking-wide transition-colors" title="기기에 파일로 백업">백업</button>
+                <button onclick="document.getElementById('import-file').click()" class="px-3 py-2 border border-white/15 hover:bg-white/10 hover:border-white/30 rounded-lg text-xs font-bold tracking-wide transition-colors" title="파일에서 데이터 불러오기">복원</button>
                 <input type="file" id="import-file" class="hidden" accept=".json,application/json" onchange="importData(event)">
             </div>
         </div>
 
-        <div class="flex max-w-3xl mx-auto" id="main-tabs">
-            <button onclick="switchTab('add')" id="tab-add" class="flex-1 py-3 text-center border-b-2 border-case text-white font-semibold transition-colors hover:bg-white/5">
+        <div class="flex max-w-3xl mx-auto px-2" id="main-tabs">
+            <button onclick="switchTab('add')" id="tab-add" class="flex-1 py-3 text-center text-sm border-b-2 border-case text-white font-bold tracking-tight transition-colors hover:bg-white/5">
                 추가
             </button>
-            <button onclick="switchTab('manage')" id="tab-manage" class="flex-1 py-3 text-center border-b-2 border-transparent text-white/45 font-semibold transition-colors hover:bg-white/5">
+            <button onclick="switchTab('manage')" id="tab-manage" class="flex-1 py-3 text-center text-sm border-b-2 border-transparent text-white/40 font-bold tracking-tight transition-colors hover:bg-white/5 hover:text-white/70">
                 관리
             </button>
-            <button onclick="switchTab('study-prep')" id="tab-study-prep" class="flex-1 py-3 text-center border-b-2 border-transparent text-white/45 font-semibold transition-colors hover:bg-white/5">
+            <button onclick="switchTab('study-prep')" id="tab-study-prep" class="flex-1 py-3 text-center text-sm border-b-2 border-transparent text-white/40 font-bold tracking-tight transition-colors hover:bg-white/5 hover:text-white/70">
                 학습
             </button>
+        </div>
+
+        <div class="tab-spectrum" aria-hidden="true">
+            <i class="bg-case"></i><i class="bg-dx"></i><i class="bg-rx"></i>
         </div>
     </header>
 
@@ -108,8 +158,8 @@
     <main class="flex-1 overflow-y-auto max-w-3xl w-full mx-auto p-4 flex flex-col relative">
 
         <!-- ==================== 1. 카드 추가 화면 ==================== -->
-        <section id="view-add" class="bg-white rounded-xl shadow-sm p-5 sm:p-6 mb-4 block">
-            <h2 class="text-lg sm:text-xl font-bold mb-3 text-ink border-b border-ink/10 pb-3 flex justify-between items-center flex-wrap gap-1">
+        <section id="view-add" class="bg-white rounded-xl border border-ink/10 shadow-sm p-5 sm:p-6 mb-4 block">
+            <h2 class="text-lg sm:text-xl font-bold tracking-tight mb-3 text-ink border-b border-ink/10 pb-3 flex justify-between items-center flex-wrap gap-1">
                 새 카드 만들기
                 <span class="text-xs font-mono font-normal text-ink/45">
                     <span id="card-count">저장된 카드: 0장</span>
@@ -118,7 +168,7 @@
             </h2>
 
             <!-- 현재 과목 (상위 계층, 모달로 변경) -->
-            <div class="flex items-center justify-between bg-paper/70 border border-ink/10 rounded-lg px-4 py-2.5 mb-3">
+            <div class="flex items-center justify-between bg-ink/[0.03] border border-ink/10 border-l-[3px] border-l-ink rounded-lg px-4 py-2.5 mb-3">
                 <p class="text-sm text-ink/70">현재 과목 · <span class="font-bold text-ink" id="add-subject-label">과목 없음</span></p>
                 <button onclick="openContextModal()" class="text-xs font-bold text-case hover:underline shrink-0 ml-2">변경</button>
             </div>
@@ -126,7 +176,7 @@
             <!-- 단원 (카드마다 바로 입력/수정, 직전 카드 값을 그대로 유지) -->
             <div class="mb-5">
                 <label class="block text-sm font-medium text-ink/70 mb-1">단원</label>
-                <input type="text" id="input-unit" list="category-list" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 focus:border-ink/30 outline-none" placeholder="단원명을 입력하세요 (기본: 미분류)">
+                <input type="text" id="input-unit" list="category-list" class="w-full p-3 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-ink/30 focus:border-ink/30 outline-none" placeholder="단원명을 입력하세요 (기본: 미분류)">
             </div>
 
             <!-- 카드 유형 선택 -->
@@ -138,10 +188,10 @@
 
             <!-- ---------- 폼 1: 증례-진단-치료 ---------- -->
             <div id="form-case_dx_rx" class="space-y-5">
-                <div class="bg-case/5 p-4 rounded-lg border-l-4 border-case relative">
+                <div class="bg-case/[0.04] p-4 rounded-lg border-l-[3px] border-case relative">
                     <h3 class="font-mono text-xs font-bold tracking-widest text-case mb-2 uppercase">CASE <span class="font-sans font-semibold text-ink/70 normal-case tracking-normal ml-1">— 증례</span></h3>
                     <label class="block text-sm font-medium text-ink/70 mb-1">증례 설명</label>
-                    <textarea id="input-case-text" rows="3" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-case/40 focus:border-case outline-none resize-none" placeholder="환자의 증상이나 병력을 입력하세요..."></textarea>
+                    <textarea id="input-case-text" rows="3" class="w-full p-3 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-case/40 focus:border-case outline-none resize-none" placeholder="환자의 증상이나 병력을 입력하세요..."></textarea>
 
                     <div class="flex items-center justify-between mt-3 mb-1">
                         <label class="block text-sm font-medium text-ink/70">사진 첨부</label>
@@ -155,30 +205,30 @@
                     </div>
                 </div>
 
-                <div class="bg-dx/5 p-4 rounded-lg border-l-4 border-dx">
+                <div class="bg-dx/[0.04] p-4 rounded-lg border-l-[3px] border-dx">
                     <h3 class="font-mono text-xs font-bold tracking-widest text-dx mb-2 uppercase">DX <span class="font-sans font-semibold text-ink/70 normal-case tracking-normal ml-1">— 진단명</span></h3>
-                    <input type="text" id="input-diagnosis" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-dx/40 focus:border-dx outline-none" placeholder="진단명을 입력하세요...">
+                    <input type="text" id="input-diagnosis" class="w-full p-3 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-dx/40 focus:border-dx outline-none" placeholder="진단명을 입력하세요...">
                 </div>
 
-                <div class="bg-rx/5 p-4 rounded-lg border-l-4 border-rx">
+                <div class="bg-rx/[0.04] p-4 rounded-lg border-l-[3px] border-rx">
                     <h3 class="font-mono text-xs font-bold tracking-widest text-rx mb-2 uppercase">RX <span class="font-sans font-semibold text-ink/70 normal-case tracking-normal ml-1">— 치료법</span></h3>
-                    <textarea id="input-treatment" rows="3" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-rx/40 focus:border-rx outline-none resize-none" placeholder="치료 방법이나 처방을 입력하세요..."></textarea>
+                    <textarea id="input-treatment" rows="3" class="w-full p-3 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-rx/40 focus:border-rx outline-none resize-none" placeholder="치료 방법이나 처방을 입력하세요..."></textarea>
                 </div>
 
-                <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-lg shadow transition-colors text-lg">
+                <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/[0.88] text-white font-bold py-4 rounded-lg shadow-sm hover:shadow transition-all text-base tracking-tight">
                     카드 저장하기
                 </button>
             </div>
 
             <!-- ---------- 폼 2: 암기 카드 (이미지 스티커) ---------- -->
             <div id="form-occlusion" class="hidden space-y-5">
-                <div class="bg-ink/5 p-4 rounded-lg border-l-4 border-ink">
+                <div class="bg-ink/[0.03] p-4 rounded-lg border-l-[3px] border-ink">
                     <h3 class="font-mono text-xs font-bold tracking-widest text-ink/70 mb-2 uppercase">암기 카드 — 이미지 스티커</h3>
                     <label class="block text-sm font-medium text-ink/70 mb-1">이미지 첨부 (표, 사진 등)</label>
                     <input type="file" id="input-occlusion-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ink/10 file:text-ink hover:file:bg-ink/20">
 
                     <input type="text" id="occlusion-paste-target" inputmode="none"
-                        class="w-full mt-3 p-4 border-2 border-dashed border-ink/25 rounded-md text-sm text-ink/40 text-center outline-none focus:border-ink/50 bg-white"
+                        class="w-full mt-3 p-4 paste-slot border-2 border-dashed border-ink/25 rounded-lg text-sm text-ink/40 text-center outline-none focus:border-ink/50 bg-white"
                         placeholder="여기를 길게 눌러 '붙여넣기'를 선택하세요 (Paste)">
                     <p class="mt-2 text-xs text-ink/40 font-mono">터치/펜슬 환경에서는 위 칸을 길게 눌러 붙여넣고, 키보드가 있다면 Ctrl+V도 됩니다. 이미지가 나타나면 손가락/펜슬로 가릴 부분을 드래그하세요. 여러 개 만들 수 있어요.</p>
 
@@ -193,20 +243,23 @@
                     </div>
                 </div>
 
-                <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-lg shadow transition-colors text-lg">
+                <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/[0.88] text-white font-bold py-4 rounded-lg shadow-sm hover:shadow transition-all text-base tracking-tight">
                     카드 저장하기
                 </button>
             </div>
 
             <!-- ---------- 폼 3: 2단 카드 (앞/뒤 + 선택적 가림막) ---------- -->
             <div id="form-basic" class="hidden space-y-5">
-                <div class="bg-case/5 p-4 rounded-lg border-l-4 border-ink">
+                <div class="bg-ink/[0.03] p-4 rounded-lg border-l-[3px] border-case">
                     <h3 class="font-mono text-xs font-bold tracking-widest text-ink/70 mb-2 uppercase">앞면</h3>
-                    <textarea id="input-basic-front-text" rows="2" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 outline-none resize-none" placeholder="질문 / 앞면 내용 (선택)"></textarea>
+                    <textarea id="input-basic-front-text" rows="2" class="w-full p-3 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-ink/30 outline-none resize-none" placeholder="질문 / 앞면 내용 (선택)"></textarea>
 
                     <label class="block text-sm font-medium text-ink/70 mb-1 mt-3">이미지 (선택)</label>
                     <input type="file" id="input-basic-front-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ink/10 file:text-ink hover:file:bg-ink/20">
-                    <p class="mt-2 text-xs text-ink/40 font-mono">이미지를 넣은 뒤 드래그하면 그 부분만 가릴 수 있어요 (선택사항, 한 곳만 지정 가능). 붙여넣기는 위 텍스트 칸을 길게 눌러 Paste를 선택하거나(터치), Ctrl+V(키보드)로 할 수 있습니다 — 앞면이 비어있으면 앞면에, 채워져 있으면 뒷면에 들어갑니다.</p>
+                    <input type="text" id="basic-front-paste-target" inputmode="none"
+                        class="w-full mt-3 p-4 paste-slot border-2 border-dashed border-ink/25 rounded-lg text-sm text-ink/40 text-center outline-none focus:border-ink/50 bg-white"
+                        placeholder="여기를 길게 눌러 '붙여넣기' (앞면 사진)">
+                    <p class="mt-2 text-xs text-ink/40 font-mono">이미지를 넣은 뒤 드래그하면 그 부분만 가릴 수 있어요 (선택사항, 한 곳만 지정 가능).</p>
 
                     <div id="basic-front-editor-wrap" class="hidden mt-3">
                         <div class="relative inline-block mx-auto rect-draw-surface select-none" id="basic-canvas-wrap">
@@ -216,12 +269,15 @@
                     </div>
                 </div>
 
-                <div class="bg-rx/5 p-4 rounded-lg border-l-4 border-ink">
+                <div class="bg-ink/[0.03] p-4 rounded-lg border-l-[3px] border-rx">
                     <h3 class="font-mono text-xs font-bold tracking-widest text-ink/70 mb-2 uppercase">뒷면</h3>
-                    <textarea id="input-basic-back-text" rows="2" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 outline-none resize-none" placeholder="답 / 뒷면 내용 (선택)"></textarea>
+                    <textarea id="input-basic-back-text" rows="2" class="w-full p-3 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-ink/30 outline-none resize-none" placeholder="답 / 뒷면 내용 (선택)"></textarea>
 
                     <label class="block text-sm font-medium text-ink/70 mb-1 mt-3">이미지 (선택)</label>
                     <input type="file" id="input-basic-back-image" accept="image/*" class="w-full text-sm text-ink/60 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-ink/10 file:text-ink hover:file:bg-ink/20">
+                    <input type="text" id="basic-back-paste-target" inputmode="none"
+                        class="w-full mt-3 p-4 paste-slot border-2 border-dashed border-ink/25 rounded-lg text-sm text-ink/40 text-center outline-none focus:border-ink/50 bg-white"
+                        placeholder="여기를 길게 눌러 '붙여넣기' (뒷면 사진)">
 
                     <div id="basic-back-preview-container" class="hidden mt-3 relative inline-block border-2 border-dashed border-ink/20 p-2 rounded bg-white">
                         <img id="basic-back-preview" src="" alt="뒷면 미리보기" class="max-h-48 rounded object-contain">
@@ -229,7 +285,7 @@
                     </div>
                 </div>
 
-                <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-lg shadow transition-colors text-lg">
+                <button onclick="addCard()" class="w-full bg-ink hover:bg-ink/[0.88] text-white font-bold py-4 rounded-lg shadow-sm hover:shadow transition-all text-base tracking-tight">
                     카드 저장하기
                 </button>
             </div>
@@ -237,8 +293,8 @@
 
 
         <!-- ==================== 2. 카드 관리 (분류/할당) 화면 ==================== -->
-        <section id="view-manage" class="hidden bg-white rounded-xl shadow-sm p-5 sm:p-6 mb-4 flex-1 flex flex-col">
-            <h2 class="text-lg sm:text-xl font-bold mb-1 text-ink border-b border-ink/10 pb-3 flex justify-between items-center">
+        <section id="view-manage" class="hidden bg-white rounded-xl border border-ink/10 shadow-sm p-5 sm:p-6 mb-4 flex-1 flex flex-col">
+            <h2 class="text-lg sm:text-xl font-bold tracking-tight mb-1 text-ink border-b border-ink/10 pb-3 flex justify-between items-center">
                 카드 분류 및 관리
             </h2>
             <p class="text-xs font-mono text-ink/40 mb-4 mt-2">저장 방식: <span id="storage-mode-label">확인 중…</span></p>
@@ -246,15 +302,23 @@
             <div class="grid grid-cols-2 gap-2 mb-4">
                 <div>
                     <label class="block text-sm font-medium text-ink/70 mb-1">과목</label>
-                    <select id="manage-filter-subject" onchange="onManageSubjectChange()" class="w-full p-2 border border-ink/15 rounded-md focus:ring-2 focus:ring-case/40 focus:border-case outline-none bg-paper/50">
+                    <select id="manage-filter-subject" onchange="onManageSubjectChange()" class="w-full p-2 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-case/40 focus:border-case outline-none bg-paper/50">
                         <option value="all">모든 과목</option>
                     </select>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-ink/70 mb-1">단원</label>
-                    <select id="manage-filter-category" onchange="renderManageList()" class="w-full p-2 border border-ink/15 rounded-md focus:ring-2 focus:ring-case/40 focus:border-case outline-none bg-paper/50">
+                    <select id="manage-filter-category" onchange="renderManageList()" class="w-full p-2 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-case/40 focus:border-case outline-none bg-paper/50">
                         <option value="all">모든 단원</option>
                     </select>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                <p class="text-sm text-ink/60">현재 목록 <span class="font-bold text-ink font-mono" id="manage-filtered-count">0</span>장</p>
+                <div class="flex gap-2">
+                    <button onclick="exportFiltered()" class="text-xs font-bold px-3 py-2 rounded-lg border border-case/35 text-case hover:bg-case hover:text-white hover:border-case transition-colors">이 목록만 백업</button>
+                    <button onclick="deleteFiltered()" class="text-xs font-bold px-3 py-2 rounded-lg border border-wrong/35 text-wrong hover:bg-wrong hover:text-white hover:border-wrong transition-colors">이 목록 전체 삭제</button>
                 </div>
             </div>
 
@@ -269,28 +333,28 @@
 
 
         <!-- ==================== 3. 학습 준비 화면 ==================== -->
-        <section id="view-study-prep" class="hidden bg-white rounded-xl shadow-sm p-6 mb-4 flex-1 flex flex-col items-center justify-center">
+        <section id="view-study-prep" class="hidden bg-white rounded-xl border border-ink/10 shadow-sm p-6 mb-4 flex-1 flex flex-col items-center justify-center">
             <h2 class="text-2xl font-bold text-ink mb-6">어떤 범위를 공부할까요?</h2>
 
             <div class="w-full max-w-sm space-y-4">
                 <div>
                     <label class="block text-sm font-bold text-ink/70 mb-2">과목</label>
-                    <select id="study-filter-subject" onchange="onStudySubjectChange()" class="w-full p-3 border-2 border-case/25 rounded-lg text-base focus:ring-2 focus:ring-case/40 outline-none text-center appearance-none cursor-pointer bg-case/5">
+                    <select id="study-filter-subject" onchange="onStudySubjectChange()" class="w-full p-3 border border-ink/15 rounded-lg text-base font-semibold focus:ring-2 focus:ring-case/30 focus:border-case outline-none text-center appearance-none cursor-pointer bg-white">
                         <option value="all">전체 과목</option>
                     </select>
                 </div>
                 <div>
                     <label class="block text-sm font-bold text-ink/70 mb-2">단원</label>
-                    <select id="study-category-select" class="w-full p-3 border-2 border-case/25 rounded-lg text-base focus:ring-2 focus:ring-case/40 outline-none text-center appearance-none cursor-pointer bg-case/5">
+                    <select id="study-category-select" class="w-full p-3 border border-ink/15 rounded-lg text-base font-semibold focus:ring-2 focus:ring-case/30 focus:border-case outline-none text-center appearance-none cursor-pointer bg-white">
                         <option value="all">전체 단원 (모든 카드)</option>
                     </select>
                 </div>
 
                 <div class="space-y-3 pt-4 border-t border-ink/10">
-                    <button onclick="startStudy('all')" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-4 rounded-xl shadow transition-colors text-lg flex items-center justify-center">
+                    <button onclick="startStudy('all')" class="w-full bg-ink hover:bg-ink/[0.88] text-white font-bold py-4 rounded-lg shadow-sm hover:shadow transition-all text-base flex items-center justify-center tracking-tight">
                         선택 범위 — 모두 학습
                     </button>
-                    <button onclick="startStudy('wrong')" class="w-full bg-wrong/5 text-wrong border-2 border-wrong/25 hover:bg-wrong/10 font-bold py-4 rounded-xl shadow-sm transition-colors text-lg flex items-center justify-center">
+                    <button onclick="startStudy('wrong')" class="w-full bg-white text-wrong border-2 border-wrong/30 hover:bg-wrong/[0.06] font-bold py-4 rounded-lg shadow-sm transition-colors text-base flex items-center justify-center tracking-tight">
                         선택 범위 — 오답만 학습
                     </button>
                 </div>
@@ -299,46 +363,46 @@
 
 
         <!-- ==================== 4. 실제 학습 화면 ==================== -->
-        <section id="view-study" class="hidden flex-1 flex flex-col justify-center items-center py-2 relative">
+        <section id="view-study" class="hidden flex-1 flex flex-col justify-start items-center pt-1 pb-2 relative">
 
-            <div class="w-full flex justify-between items-center mb-4 px-2">
-                <button onclick="switchTab('study-prep')" class="text-sm font-bold bg-ink/5 text-ink/70 hover:bg-ink/10 py-1.5 px-3 rounded-lg transition-colors flex items-center shadow-sm">
+            <div class="w-full flex justify-between items-center mb-3 px-1">
+                <button onclick="switchTab('study-prep')" class="text-xs font-bold text-ink/60 hover:text-ink border border-ink/10 hover:border-ink/30 bg-white py-2 px-3 rounded-lg transition-colors">
                     학습 종료
                 </button>
 
-                <span id="study-progress" class="text-sm font-mono font-bold text-ink/50">0 / 0</span>
+                <span id="study-progress" class="font-mono text-sm font-bold text-ink/70 tabular-nums">0 / 0</span>
 
                 <div class="flex gap-2">
-                    <button onclick="shuffleCards()" class="text-sm font-bold bg-ink/5 text-ink/70 hover:bg-ink/10 py-1.5 px-3 rounded-lg transition-colors shadow-sm" title="카드 순서 섞기">섞기</button>
+                    <button onclick="shuffleCards()" class="text-xs font-bold text-ink/60 hover:text-ink border border-ink/10 hover:border-ink/30 bg-white py-2 px-3 rounded-lg transition-colors" title="카드 순서 섞기">섞기</button>
                 </div>
             </div>
 
-            <div class="w-full text-center mb-2">
-                <span id="study-target-badge" class="text-xs font-mono font-bold bg-ink/5 text-ink/70 py-1 px-2 rounded-full mr-1">단원명</span>
-                <span id="study-mode-badge" class="text-xs font-mono font-bold bg-case/10 text-case py-1 px-2 rounded-full">모두 학습</span>
+            <div class="w-full flex justify-center items-center gap-1.5 mb-3">
+                <span id="study-target-badge" class="eyebrow-ko text-ink/55 bg-white border border-ink/10 py-1.5 px-2.5 rounded-md">단원명</span>
+                <span id="study-mode-badge" class="eyebrow-ko bg-case/10 text-case py-1.5 px-2.5 rounded-md">모두 학습</span>
             </div>
 
             <!-- 플래시카드 본체 -->
             <div class="card-container w-full h-[400px] sm:h-[450px] cursor-pointer" onclick="flipCard()">
-                <div id="flashcard" class="flashcard rule-lines w-full h-full bg-white rounded-2xl p-6 flex flex-col items-center justify-center text-center relative border border-ink/10 border-t-4 border-t-case">
+                <div id="flashcard" class="flashcard w-full h-full bg-white rounded-xl px-6 pb-6 pt-4 flex flex-col items-center justify-center text-center relative border border-ink/10 border-t-case overflow-hidden">
 
-                    <div class="absolute top-5 right-5 flex space-x-1" id="side-indicators">
-                        <div class="w-2 h-2 rounded-full bg-case"></div>
-                        <div class="w-2 h-2 rounded-full bg-ink/15"></div>
-                        <div class="w-2 h-2 rounded-full bg-ink/15"></div>
+                    <!-- 시그니처: 차트 바인더의 색인 탭 -->
+                    <div class="absolute top-0 left-0 right-0 flex gap-1 px-5" id="side-indicators">
+                        <div class="flex-1 chart-tab is-active bg-case"></div>
+                        <div class="flex-1 chart-tab bg-dx"></div>
+                        <div class="flex-1 chart-tab bg-rx"></div>
                     </div>
 
-                    <div id="card-label" class="absolute top-5 left-5 font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-case/10 text-case max-w-[55%] truncate">
+                    <div id="card-label" class="absolute top-6 left-6 eyebrow-ko px-2 py-1 rounded bg-case/10 text-case max-w-[60%] truncate">
                         CASE
                     </div>
 
-                    <div class="w-full h-full flex flex-col overflow-y-auto hide-scrollbar pt-8 pb-4">
+                    <div class="w-full h-full flex flex-col overflow-y-auto hide-scrollbar pt-10 pb-6">
                         <div id="card-content" class="m-auto w-full flex flex-col items-center">
-                            <!-- 컨텐츠 -->
                         </div>
                     </div>
 
-                    <div class="absolute bottom-4 text-ink/30 text-sm flex items-center" id="flip-hint">
+                    <div class="absolute bottom-3 left-0 right-0 text-ink/25 text-xs" id="flip-hint">
                         클릭해서 다음 장 보기
                     </div>
                 </div>
@@ -348,10 +412,10 @@
 
             <!-- 평가 버튼 -->
             <div class="flex w-full gap-4 mt-4">
-                <button onclick="markCard(true)" class="flex-1 bg-white border-2 border-wrong/25 hover:bg-wrong/5 text-wrong font-bold py-4 rounded-xl shadow-sm transition-colors text-lg flex items-center justify-center">
+                <button onclick="markCard(true)" class="flex-1 bg-white border-2 border-wrong/30 hover:bg-wrong hover:text-white hover:border-wrong text-wrong font-bold py-4 rounded-lg shadow-sm transition-colors text-base flex items-center justify-center">
                     틀림 (오답)
                 </button>
-                <button onclick="markCard(false)" class="flex-1 bg-white border-2 border-correct/25 hover:bg-correct/5 text-correct font-bold py-4 rounded-xl shadow-sm transition-colors text-lg flex items-center justify-center">
+                <button onclick="markCard(false)" class="flex-1 bg-white border-2 border-correct/30 hover:bg-correct hover:text-white hover:border-correct text-correct font-bold py-4 rounded-lg shadow-sm transition-colors text-base flex items-center justify-center">
                     맞음 (정답)
                 </button>
             </div>
@@ -359,11 +423,11 @@
 
         <!-- ==================== 5. 학습 결과 화면 ==================== -->
         <section id="view-result" class="hidden flex-1 flex flex-col items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-md text-center border border-ink/10">
+            <div class="bg-white rounded-xl shadow-sm p-8 w-full max-w-md text-center border border-ink/10">
                 <h2 class="text-2xl font-bold text-ink mb-1">학습 완료!</h2>
                 <p class="text-ink/50 mb-6">이번 세션의 학습 결과를 확인하세요.</p>
 
-                <div id="result-circle" class="w-36 h-36 rounded-full flex items-center justify-center relative mb-8 mx-auto shadow-inner transition-all duration-1000 ease-out" style="background: conic-gradient(#2B6E64 0%, #E7E5DE 0%);">
+                <div id="result-circle" class="w-36 h-36 rounded-full flex items-center justify-center relative mb-8 mx-auto transition-all duration-700 ease-out" style="background: conic-gradient(#1B6B78 0%, #D5DDE0 0%);">
                     <div class="w-32 h-32 bg-white rounded-full flex items-center justify-center absolute shadow-sm">
                         <div class="flex flex-col items-center">
                             <span class="text-xs text-ink/40 font-bold mb-1">정답률</span>
@@ -372,7 +436,7 @@
                     </div>
                 </div>
 
-                <div class="flex justify-between bg-paper/60 rounded-xl p-4 mb-6 border border-ink/10">
+                <div class="flex justify-between bg-ink/[0.03] rounded-lg p-4 mb-6 border border-ink/10">
                     <div class="text-center w-1/3">
                         <p class="text-xs text-ink/50 font-semibold mb-1">전체 문제</p>
                         <p class="text-xl font-bold font-mono text-ink" id="result-total">0</p>
@@ -388,7 +452,7 @@
                 </div>
 
                 <div class="space-y-3">
-                    <button onclick="switchTab('study-prep')" class="w-full bg-ink hover:bg-ink/90 text-white font-bold py-3.5 rounded-xl transition-colors shadow-sm text-lg">
+                    <button onclick="switchTab('study-prep')" class="w-full bg-ink hover:bg-ink/[0.88] text-white font-bold py-3.5 rounded-lg transition-colors shadow-sm text-base tracking-tight">
                         돌아가기
                     </button>
                 </div>
@@ -404,28 +468,122 @@
     </main>
 
     <!-- 현재 과목 변경 모달 -->
-    <div id="context-modal" class="hidden fixed inset-0 bg-ink/40 z-50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+    <div id="context-modal" class="hidden fixed inset-0 bg-ink/50 backdrop-blur-[2px] z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl border border-ink/10 max-w-sm w-full p-6">
             <h3 class="text-lg font-bold text-ink mb-1">현재 과목 변경</h3>
             <p class="text-xs text-ink/40 mb-4">여기서 설정한 과목으로 새 카드가 계속 저장됩니다. (단원은 추가 화면에서 바로 입력합니다)</p>
             <div>
                 <label class="block text-sm font-medium text-ink/70 mb-1">과목</label>
-                <input type="text" id="context-subject-input" list="subject-list" class="w-full p-3 border border-ink/15 rounded-md focus:ring-2 focus:ring-ink/30 outline-none" placeholder="예: 순환기내과 (비워두면 '과목 없음')">
+                <input type="text" id="context-subject-input" list="subject-list" class="w-full p-3 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-ink/30 outline-none" placeholder="예: 순환기내과 (비워두면 '과목 없음')">
             </div>
             <div class="flex gap-2 mt-6">
                 <button onclick="closeContextModal()" class="flex-1 py-3 rounded-lg text-ink/50 font-semibold hover:bg-paper transition-colors">취소</button>
-                <button onclick="applyContextChange()" class="flex-1 py-3 rounded-lg bg-ink text-white font-bold hover:bg-ink/90 transition-colors">적용</button>
+                <button onclick="applyContextChange()" class="flex-1 py-3 rounded-lg bg-ink text-white font-bold hover:bg-ink/[0.88] transition-colors tracking-tight">적용</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 카드 수정 모달 -->
+    <div id="edit-modal" class="hidden fixed inset-0 bg-ink/50 backdrop-blur-[2px] z-50 flex items-start justify-center p-4 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-xl border border-ink/10 max-w-lg w-full p-6 my-8">
+            <h3 class="text-lg font-bold text-ink mb-1">카드 수정</h3>
+            <p class="text-xs text-ink/40 mb-4" id="edit-modal-type-label">카드 유형</p>
+
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">과목</label>
+                        <input type="text" id="edit-subject" list="subject-list" class="w-full p-2.5 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-ink/30 outline-none" placeholder="과목 없음">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">단원</label>
+                        <input type="text" id="edit-unit" list="category-list" class="w-full p-2.5 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-ink/30 outline-none" placeholder="미분류">
+                    </div>
+                </div>
+
+                <!-- 증례-진단-치료 편집 -->
+                <div id="edit-fields-case_dx_rx" class="hidden space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">증례 설명</label>
+                        <textarea id="edit-case-text" rows="3" class="w-full p-2.5 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-case/40 outline-none resize-none"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">증례 사진</label>
+                        <div id="edit-case-image-wrap" class="hidden relative inline-block border-2 border-dashed border-case/30 p-2 rounded bg-white mb-2">
+                            <img id="edit-case-image" src="" class="max-h-40 rounded object-contain" alt="증례 사진">
+                            <button onclick="editRemoveCaseImage()" class="absolute -top-2 -right-2 bg-wrong text-white rounded-full w-6 h-6 flex items-center justify-center shadow-md text-sm leading-none font-bold" title="사진 삭제">×</button>
+                        </div>
+                        <input type="text" id="edit-case-paste-target" inputmode="none" class="w-full p-3 paste-slot border-2 border-dashed border-ink/25 rounded-lg text-xs text-ink/40 text-center outline-none focus:border-ink/50" placeholder="여기를 길게 눌러 '붙여넣기' (사진 교체)">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">진단명</label>
+                        <input type="text" id="edit-diagnosis" class="w-full p-2.5 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-dx/40 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">치료법</label>
+                        <textarea id="edit-treatment" rows="3" class="w-full p-2.5 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-rx/40 outline-none resize-none"></textarea>
+                    </div>
+                </div>
+
+                <!-- 암기 카드 편집 -->
+                <div id="edit-fields-occlusion" class="hidden space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">이미지 및 스티커</label>
+                        <div id="edit-occlusion-wrap" class="hidden">
+                            <div class="relative inline-block mx-auto rect-draw-surface select-none" id="edit-occlusion-canvas-wrap">
+                                <img id="edit-occlusion-img" src="" class="block max-w-full max-h-[320px] rounded pointer-events-none" alt="편집 중 이미지" draggable="false">
+                            </div>
+                            <p class="text-xs text-ink/40 font-mono mt-2">스티커 <span id="edit-occlusion-sticker-count">0</span>개 · 드래그해서 추가, 탭하면 삭제</p>
+                        </div>
+                        <input type="text" id="edit-occlusion-paste-target" inputmode="none" class="w-full mt-2 p-3 paste-slot border-2 border-dashed border-ink/25 rounded-lg text-xs text-ink/40 text-center outline-none focus:border-ink/50" placeholder="여기를 길게 눌러 '붙여넣기' (이미지 교체)">
+                    </div>
+                </div>
+
+                <!-- 2단 카드 편집 -->
+                <div id="edit-fields-basic" class="hidden space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">앞면 텍스트</label>
+                        <textarea id="edit-basic-front-text" rows="2" class="w-full p-2.5 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-ink/30 outline-none resize-none"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">앞면 사진 및 가림막</label>
+                        <div id="edit-basic-front-wrap" class="hidden">
+                            <div class="relative inline-block mx-auto rect-draw-surface select-none" id="edit-basic-canvas-wrap">
+                                <img id="edit-basic-front-img" src="" class="block max-w-full max-h-[260px] rounded pointer-events-none" alt="앞면 이미지" draggable="false">
+                            </div>
+                            <button onclick="editClearBasicMask()" class="text-xs text-wrong font-semibold mt-2 block">가림막 지우기</button>
+                        </div>
+                        <input type="text" id="edit-basic-front-paste-target" inputmode="none" class="w-full mt-2 p-3 paste-slot border-2 border-dashed border-ink/25 rounded-lg text-xs text-ink/40 text-center outline-none focus:border-ink/50" placeholder="여기를 길게 눌러 '붙여넣기' (앞면 사진)">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">뒷면 텍스트</label>
+                        <textarea id="edit-basic-back-text" rows="2" class="w-full p-2.5 border border-ink/15 rounded-lg bg-white focus:ring-2 focus:ring-ink/30 outline-none resize-none"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-ink/70 mb-1">뒷면 사진</label>
+                        <div id="edit-basic-back-wrap" class="hidden relative inline-block border-2 border-dashed border-ink/20 p-2 rounded bg-white mb-2">
+                            <img id="edit-basic-back-img" src="" class="max-h-40 rounded object-contain" alt="뒷면 사진">
+                            <button onclick="editRemoveBasicBackImage()" class="absolute -top-2 -right-2 bg-wrong text-white rounded-full w-6 h-6 flex items-center justify-center shadow-md text-sm leading-none font-bold" title="사진 삭제">×</button>
+                        </div>
+                        <input type="text" id="edit-basic-back-paste-target" inputmode="none" class="w-full p-3 paste-slot border-2 border-dashed border-ink/25 rounded-lg text-xs text-ink/40 text-center outline-none focus:border-ink/50" placeholder="여기를 길게 눌러 '붙여넣기' (뒷면 사진)">
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-2 mt-6">
+                <button onclick="closeEditModal()" class="flex-1 py-3 rounded-lg text-ink/50 font-semibold hover:bg-paper transition-colors">취소</button>
+                <button onclick="saveEditedCard()" class="flex-1 py-3 rounded-lg bg-ink text-white font-bold hover:bg-ink/[0.88] transition-colors tracking-tight">저장</button>
             </div>
         </div>
     </div>
 
     <!-- 백업 파일 복원 모드 선택 모달 -->
-    <div id="import-modal" class="hidden fixed inset-0 bg-ink/40 z-50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+    <div id="import-modal" class="hidden fixed inset-0 bg-ink/50 backdrop-blur-[2px] z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl border border-ink/10 max-w-sm w-full p-6">
             <h3 class="text-lg font-bold text-ink mb-2">백업 파일 복원</h3>
             <p class="text-sm text-ink/60 mb-5">불러온 파일에 <span id="import-modal-count" class="font-mono font-bold text-ink">0</span>장의 카드가 있습니다. 어떻게 반영할까요?</p>
             <div class="space-y-2">
-                <button onclick="confirmImport('merge')" class="w-full py-3 rounded-lg bg-ink text-white font-bold hover:bg-ink/90 transition-colors">
+                <button onclick="confirmImport('merge')" class="w-full py-3 rounded-lg bg-ink text-white font-bold hover:bg-ink/[0.88] transition-colors tracking-tight">
                     기존 카드에 추가 (병합)
                 </button>
                 <button onclick="confirmImport('replace')" class="w-full py-3 rounded-lg border-2 border-wrong/40 text-wrong font-bold hover:bg-wrong/5 transition-colors">
@@ -439,7 +597,7 @@
     </div>
 
     <!-- 토스트 알림 -->
-    <div id="toast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-ink text-white px-6 py-3 rounded-full opacity-0 transition-opacity duration-300 pointer-events-none shadow-lg z-50">
+    <div id="toast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-ink text-white text-sm font-semibold px-5 py-3 rounded-lg opacity-0 transition-opacity duration-300 pointer-events-none shadow-xl z-50">
         알림 메시지
     </div>
 
@@ -826,6 +984,11 @@
             });
 
             document.addEventListener('paste', function (e) {
+                // 편집 모달이 열려 있으면 그쪽 붙여넣기 처리로 넘김
+                if (!document.getElementById('edit-modal').classList.contains('hidden')) {
+                    handleEditModalPaste(e);
+                    return;
+                }
                 if (document.getElementById('view-add').classList.contains('hidden')) return;
 
                 const items = (e.clipboardData || e.originalEvent.clipboardData).items;
@@ -835,10 +998,17 @@
                         const blob = item.getAsFile();
                         e.preventDefault();
 
+                        const activeId = document.activeElement ? document.activeElement.id : '';
+
                         if (currentCardType === 'occlusion') {
                             processImageFile(blob, (url) => initOcclusionEditor(url));
                         } else if (currentCardType === 'basic') {
-                            if (!basicFrontEditorImage) {
+                            // 어느 붙여넣기 칸에 포커스가 있었는지로 앞/뒤를 결정. 애매하면 앞면부터 채움.
+                            if (activeId === 'basic-back-paste-target' || activeId === 'input-basic-back-text') {
+                                processImageFile(blob, (url) => { basicBackImage = url; showBasicBackPreview(url); });
+                            } else if (activeId === 'basic-front-paste-target' || activeId === 'input-basic-front-text') {
+                                processImageFile(blob, (url) => initBasicFrontEditor(url));
+                            } else if (!basicFrontEditorImage) {
                                 processImageFile(blob, (url) => initBasicFrontEditor(url));
                             } else {
                                 processImageFile(blob, (url) => { basicBackImage = url; showBasicBackPreview(url); });
@@ -847,8 +1017,10 @@
                             processImageFile(blob, (url) => { currentImageBase64 = url; showCasePreview(url); });
                         }
 
-                        const pasteTargetEl = document.getElementById('occlusion-paste-target');
-                        if (pasteTargetEl) pasteTargetEl.value = '';
+                        ['occlusion-paste-target', 'basic-front-paste-target', 'basic-back-paste-target'].forEach(id => {
+                            const el = document.getElementById(id);
+                            if (el) el.value = '';
+                        });
                         if (document.activeElement && typeof document.activeElement.blur === 'function') {
                             document.activeElement.blur();
                         }
@@ -938,10 +1110,17 @@
         // imgEl: 실제 <img> 엘리먼트 (렌더링된 박스 기준으로 좌표 계산)
         // onRectDrawn({x,y,w,h}) : 이미지 대비 %로 정규화된 사각형이 확정되었을 때 호출
         function makeDraggableRectOverlay(wrapEl, imgEl, onRectDrawn) {
+            // 중요: 같은 컨테이너에 리스너가 중복 부착되면 드래그 한 번에 스티커가 여러 개 생깁니다.
+            // 이미 부착된 경우에는 콜백만 교체하고 리스너는 다시 달지 않습니다.
+            wrapEl._onRectDrawn = onRectDrawn;
+            wrapEl._rectImgEl = imgEl;
+            if (wrapEl._rectOverlayAttached) return;
+            wrapEl._rectOverlayAttached = true;
+
             let startX = 0, startY = 0, dragging = false, previewEl = null;
 
             function getRelativePoint(evt) {
-                const rect = imgEl.getBoundingClientRect();
+                const rect = wrapEl._rectImgEl.getBoundingClientRect();
                 let x = evt.clientX - rect.left;
                 let y = evt.clientY - rect.top;
                 x = Math.max(0, Math.min(x, rect.width));
@@ -950,7 +1129,7 @@
             }
 
             wrapEl.addEventListener('pointerdown', function (e) {
-                if (e.target !== imgEl && e.target !== wrapEl) return; // 기존 스티커 위에서 시작하면 무시 (삭제 클릭과 충돌 방지)
+                if (e.target !== wrapEl._rectImgEl && e.target !== wrapEl) return; // 기존 스티커 위에서 시작하면 무시 (삭제 클릭과 충돌 방지)
                 e.preventDefault();
                 const p = getRelativePoint(e);
                 startX = p.x; startY = p.y; dragging = true;
@@ -983,7 +1162,7 @@
                 if (!dragging) return;
                 dragging = false;
                 const p = getRelativePoint(e);
-                const rect = imgEl.getBoundingClientRect();
+                const rect = wrapEl._rectImgEl.getBoundingClientRect();
                 const left = Math.min(startX, p.x);
                 const top = Math.min(startY, p.y);
                 const w = Math.abs(p.x - startX);
@@ -991,7 +1170,7 @@
                 if (previewEl) { previewEl.remove(); previewEl = null; }
                 if (w < 8 || h < 8 || rect.width === 0 || rect.height === 0) return; // 너무 작은 드래그(=탭 실수)는 무시
 
-                onRectDrawn({
+                wrapEl._onRectDrawn({
                     x: +(left / rect.width * 100).toFixed(2),
                     y: +(top / rect.height * 100).toFixed(2),
                     w: +(w / rect.width * 100).toFixed(2),
@@ -1019,16 +1198,20 @@
             occlusionEditorImage = dataUrl;
             draftOcclusions = [];
             const img = document.getElementById('occlusion-editor-img');
-            img.src = dataUrl;
             document.getElementById('occlusion-editor-wrap').classList.remove('hidden');
-            img.onload = function () {
+
+            function setup() {
                 const wrap = document.getElementById('occlusion-canvas-wrap');
                 renderOcclusionStickerEditor();
                 makeDraggableRectOverlay(wrap, img, function (rect) {
                     draftOcclusions.push(Object.assign({ id: generateId() }, rect));
                     renderOcclusionStickerEditor();
                 });
-            };
+            }
+
+            img.onload = setup;
+            img.src = dataUrl;
+            if (img.complete && img.naturalWidth > 0) setup(); // 같은 이미지를 다시 넣어 onload가 안 뜨는 경우 대비
         }
 
         function renderOcclusionStickerEditor() {
@@ -1061,16 +1244,20 @@
             basicFrontEditorImage = dataUrl;
             draftBasicMask = null;
             const img = document.getElementById('basic-front-editor-img');
-            img.src = dataUrl;
             document.getElementById('basic-front-editor-wrap').classList.remove('hidden');
-            img.onload = function () {
+
+            function setup() {
                 const wrap = document.getElementById('basic-canvas-wrap');
                 renderBasicMaskEditor();
                 makeDraggableRectOverlay(wrap, img, function (rect) {
                     draftBasicMask = rect; // 한 개만 허용 (새로 그리면 교체)
                     renderBasicMaskEditor();
                 });
-            };
+            }
+
+            img.onload = setup;
+            img.src = dataUrl;
+            if (img.complete && img.naturalWidth > 0) setup();
         }
 
         function renderBasicMaskEditor() {
@@ -1184,8 +1371,8 @@
         }
 
         // ==================== 백업(내보내기) ====================
-        async function exportData() {
-            if (cards.length === 0) { alert('백업할 카드가 없습니다.'); return; }
+        async function exportCardList(list, filenameHint, contextLabel) {
+            if (!list || list.length === 0) { alert('백업할 카드가 없습니다.'); return; }
 
             showToast('백업 파일 생성 중...');
             await new Promise(r => setTimeout(r, 30)); // 토스트가 먼저 그려지도록 한 프레임 양보
@@ -1195,8 +1382,9 @@
                     format: 'flashcard-backup',
                     version: 2,
                     exportedAt: new Date().toISOString(),
-                    count: cards.length,
-                    cards: cards
+                    scope: contextLabel || '전체',
+                    count: list.length,
+                    cards: list
                 };
                 const dataStr = JSON.stringify(payload);
                 const blob = new Blob([dataStr], { type: 'application/json' });
@@ -1206,17 +1394,59 @@
                 const a = document.createElement('a');
                 a.href = url;
                 const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-                a.download = `flashcards_backup_${stamp}.json`;
+                a.download = `flashcards_${filenameHint}_${stamp}.json`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
 
-                showToast(`백업 완료 (카드 ${cards.length}장, ${sizeMB}MB)`);
+                showToast(`백업 완료 (카드 ${list.length}장, ${sizeMB}MB)`);
             } catch (e) {
                 console.error(e);
                 alert('백업 파일 생성 중 오류가 발생했습니다: ' + (e && e.message ? e.message : e));
             }
+        }
+
+        async function exportData() {
+            return exportCardList(cards, 'backup', '전체');
+        }
+
+        // 현재 관리 탭 필터(과목/단원)에 걸린 카드만 백업
+        async function exportFiltered() {
+            const list = getManageFilteredCards();
+            const label = getManageFilterLabel();
+            if (list.length === 0) { alert('현재 목록에 백업할 카드가 없습니다.'); return; }
+            const safeName = label.replace(/[^\w가-힣]+/g, '_').replace(/^_+|_+$/g, '') || 'filtered';
+            return exportCardList(list, safeName, label);
+        }
+
+        // 현재 관리 탭 필터에 걸린 카드만 일괄 삭제
+        async function deleteFiltered() {
+            const list = getManageFilteredCards();
+            const label = getManageFilterLabel();
+            if (list.length === 0) { alert('현재 목록에 삭제할 카드가 없습니다.'); return; }
+
+            if (!confirm(`[${label}]\n이 목록의 카드 ${list.length}장을 삭제합니다. 되돌릴 수 없습니다. 계속할까요?`)) return;
+            if (!confirm('한 번 더 확인합니다. 삭제 전에 "이 목록만 백업"으로 저장해두는 것을 권장합니다. 정말 삭제할까요?')) return;
+
+            const idsToDelete = new Set(list.map(c => c.id));
+            const backup = cards.slice();
+            cards = cards.filter(c => !idsToDelete.has(c.id));
+
+            try {
+                await persistAll(cards);
+            } catch (e) {
+                cards = backup;
+                console.error(e);
+                alert('삭제에 실패했습니다: ' + (e && e.message ? e.message : e));
+                return;
+            }
+
+            updateCardCount();
+            updateGlobalDatalists();
+            updateManageFilters();
+            renderManageList();
+            showToast(`${idsToDelete.size}장이 삭제되었습니다.`);
         }
 
         // ==================== 복원(가져오기) ====================
@@ -1539,20 +1769,17 @@
 
         function cardTypeBadge(cardType) {
             const map = {
-                case_dx_rx: { label: '증례', cls: 'text-case border-case/40' },
-                occlusion: { label: '암기', cls: 'text-ink/70 border-ink/30' },
-                basic: { label: '2단', cls: 'text-rx border-rx/40' }
+                case_dx_rx: { label: 'CASE', cls: 'text-case bg-case/10' },
+                occlusion: { label: 'IMG', cls: 'text-dx bg-dx/10' },
+                basic: { label: '2-SIDE', cls: 'text-rx bg-rx/10' }
             };
             const meta = map[cardType] || map.case_dx_rx;
-            return `<span class="text-[10px] font-mono font-bold border rounded px-1.5 py-0.5 ${meta.cls}">${meta.label}</span>`;
+            return `<span class="eyebrow rounded px-1.5 py-1 ${meta.cls}">${meta.label}</span>`;
         }
 
-        function renderManageList() {
-            const container = document.getElementById('manage-list-container');
+        function getManageFilteredCards() {
             const filterSubject = document.getElementById('manage-filter-subject').value;
             const filterCategory = document.getElementById('manage-filter-category').value;
-
-            container.innerHTML = '';
 
             let filteredCards = cards;
             if (filterSubject === '__none__') {
@@ -1563,23 +1790,41 @@
             if (filterCategory !== 'all') {
                 filteredCards = filteredCards.filter(c => c.category === filterCategory);
             }
+            return filteredCards;
+        }
+
+        function getManageFilterLabel() {
+            const filterSubject = document.getElementById('manage-filter-subject').value;
+            const filterCategory = document.getElementById('manage-filter-category').value;
+            const subjectPart = filterSubject === 'all' ? '전체 과목' : (filterSubject === '__none__' ? '과목 없음' : filterSubject);
+            const unitPart = filterCategory === 'all' ? '전체 단원' : filterCategory;
+            return `${subjectPart} › ${unitPart}`;
+        }
+
+        function renderManageList() {
+            const container = document.getElementById('manage-list-container');
+            container.innerHTML = '';
+
+            const filteredCards = getManageFilteredCards();
+            const countEl = document.getElementById('manage-filtered-count');
+            if (countEl) countEl.textContent = filteredCards.length;
 
             filteredCards.slice().reverse().forEach(card => {
                 const item = document.createElement('div');
-                item.className = "p-4 border border-ink/10 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white hover:bg-paper/60 transition-colors";
+                item.className = "p-4 border border-ink/10 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white hover:border-ink/25 transition-colors";
 
                 const summary = getCardSummary(card);
                 const shortSubtitle = summary.subtitle.length > 34 ? summary.subtitle.substring(0, 34) + '…' : summary.subtitle;
                 const subjectUnitLabel = `${card.subject || '과목없음'} › ${card.category}`;
                 const statusTag = card.isWrong
-                    ? '<span class="text-[10px] font-mono font-bold text-wrong border border-wrong/40 rounded px-1.5 py-0.5">오답</span>'
-                    : '<span class="text-[10px] font-mono font-bold text-correct border border-correct/40 rounded px-1.5 py-0.5">정답</span>';
+                    ? '<span class="eyebrow-ko text-wrong bg-wrong/10 rounded px-1.5 py-1">오답</span>'
+                    : '<span class="eyebrow-ko text-correct bg-correct/10 rounded px-1.5 py-1">정답</span>';
 
                 item.innerHTML = `
                     <div class="flex-1 min-w-0 w-full">
                         <div class="flex items-center gap-2 mb-1 flex-wrap">
                             ${cardTypeBadge(card.cardType)}
-                            <span class="text-[11px] font-mono font-bold px-2 py-0.5 bg-ink/5 text-ink/70 rounded truncate max-w-[160px]" title="${escapeHTML(subjectUnitLabel)}">${escapeHTML(subjectUnitLabel)}</span>
+                            <span class="text-[11px] font-mono font-semibold px-2 py-1 bg-ink/[0.05] text-ink/60 rounded truncate max-w-[170px]" title="${escapeHTML(subjectUnitLabel)}">${escapeHTML(subjectUnitLabel)}</span>
                             ${statusTag}
                         </div>
                         <h4 class="font-bold text-ink truncate">${escapeHTML(summary.title)}</h4>
@@ -1588,9 +1833,10 @@
                     <div class="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
                         <input type="text" list="category-list" value="${escapeHTML(card.category)}"
                             onchange="updateCardCategory('${card.id}', this.value)"
-                            class="flex-1 sm:w-32 p-2 text-sm border border-ink/15 rounded focus:ring-1 focus:ring-case focus:border-case outline-none"
+                            class="flex-1 sm:w-28 p-2 text-sm border border-ink/15 rounded-lg focus:ring-2 focus:ring-case/30 focus:border-case outline-none"
                             placeholder="단원 변경">
-                        <button onclick="deleteCard('${card.id}')" class="px-3 py-2 text-sm font-semibold text-wrong hover:bg-wrong/10 rounded border border-wrong/25 transition-colors" title="삭제">삭제</button>
+                        <button onclick="openEditModal('${card.id}')" class="px-3 py-2 text-sm font-semibold text-case hover:bg-case hover:text-white rounded-lg border border-case/30 hover:border-case transition-colors" title="수정">수정</button>
+                        <button onclick="deleteCard('${card.id}')" class="px-3 py-2 text-sm font-semibold text-wrong hover:bg-wrong hover:text-white rounded-lg border border-wrong/25 hover:border-wrong transition-colors" title="삭제">삭제</button>
                     </div>
                 `;
                 container.appendChild(item);
@@ -1598,9 +1844,9 @@
 
             if (filteredCards.length === 0) {
                 if (cards.length === 0) {
-                    container.innerHTML = '<p class="text-center text-ink/40 py-16">아직 만든 카드가 없습니다.<br>‘추가’ 탭에서 첫 카드를 만들어보세요.</p>';
+                    container.innerHTML = '<p class="text-center text-ink/40 py-16 text-sm leading-relaxed">아직 카드가 없습니다.<br>‘추가’ 탭에서 첫 카드를 만들어보세요.</p>';
                 } else {
-                    container.innerHTML = '<p class="text-center text-ink/40 py-16">이 조건에는 카드가 없습니다.</p>';
+                    container.innerHTML = '<p class="text-center text-ink/40 py-16 text-sm">이 조건에 맞는 카드가 없습니다. 위 필터를 바꿔보세요.</p>';
                 }
             }
         }
@@ -1665,6 +1911,272 @@
             showToast('모든 카드가 삭제되었습니다.');
         }
 
+        // ==================== 카드 수정 (편집 모달) ====================
+        let editingCardId = null;
+        let editDraft = null; // { caseImage, image, occlusions, frontImage, mask, backImage }
+
+        function openEditModal(id) {
+            const card = cards.find(c => c.id === id);
+            if (!card) { alert('카드를 찾을 수 없습니다.'); return; }
+
+            editingCardId = id;
+            editDraft = {
+                caseImage: card.caseImage || null,
+                image: card.image || null,
+                occlusions: Array.isArray(card.occlusions) ? card.occlusions.map(o => Object.assign({}, o)) : [],
+                frontImage: card.frontImage || null,
+                mask: card.mask ? Object.assign({}, card.mask) : null,
+                backImage: card.backImage || null
+            };
+
+            document.getElementById('edit-subject').value = card.subject || '';
+            document.getElementById('edit-unit').value = card.category || '미분류';
+
+            const typeLabels = { case_dx_rx: '증례 · 진단 · 치료 카드', occlusion: '암기 카드 (이미지 스티커)', basic: '2단 카드 (앞/뒤)' };
+            document.getElementById('edit-modal-type-label').textContent = typeLabels[card.cardType] || '카드';
+
+            ['case_dx_rx', 'occlusion', 'basic'].forEach(t => {
+                document.getElementById('edit-fields-' + t).classList.toggle('hidden', t !== card.cardType);
+            });
+
+            ['edit-case-paste-target', 'edit-occlusion-paste-target', 'edit-basic-front-paste-target', 'edit-basic-back-paste-target'].forEach(pid => {
+                const el = document.getElementById(pid);
+                if (el) el.value = '';
+            });
+
+            if (card.cardType === 'case_dx_rx') {
+                document.getElementById('edit-case-text').value = card.caseText || '';
+                document.getElementById('edit-diagnosis').value = card.diagnosis || '';
+                document.getElementById('edit-treatment').value = card.treatment || '';
+                editRenderCaseImage();
+            } else if (card.cardType === 'occlusion') {
+                editRenderOcclusion();
+            } else if (card.cardType === 'basic') {
+                document.getElementById('edit-basic-front-text').value = card.frontText || '';
+                document.getElementById('edit-basic-back-text').value = card.backText || '';
+                editRenderBasicFront();
+                editRenderBasicBack();
+            }
+
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+            editingCardId = null;
+            editDraft = null;
+        }
+
+        // ---- 편집 모달: 증례 사진 ----
+        function editRenderCaseImage() {
+            const wrap = document.getElementById('edit-case-image-wrap');
+            const img = document.getElementById('edit-case-image');
+            if (editDraft.caseImage) {
+                img.src = editDraft.caseImage;
+                wrap.classList.remove('hidden');
+            } else {
+                wrap.classList.add('hidden');
+            }
+        }
+
+        function editRemoveCaseImage() {
+            editDraft.caseImage = null;
+            editRenderCaseImage();
+        }
+
+        // ---- 편집 모달: 암기 카드 스티커 ----
+        function editRenderOcclusion() {
+            const wrap = document.getElementById('edit-occlusion-wrap');
+            const img = document.getElementById('edit-occlusion-img');
+            if (!editDraft.image) { wrap.classList.add('hidden'); return; }
+            wrap.classList.remove('hidden');
+
+            function setup() {
+                const canvasWrap = document.getElementById('edit-occlusion-canvas-wrap');
+                editRenderOcclusionStickers();
+                makeDraggableRectOverlay(canvasWrap, img, function (rect) {
+                    editDraft.occlusions.push(Object.assign({ id: generateId() }, rect));
+                    editRenderOcclusionStickers();
+                });
+            }
+
+            img.onload = setup;
+            img.src = editDraft.image;
+            if (img.complete && img.naturalWidth > 0) setup();
+        }
+
+        function editRenderOcclusionStickers() {
+            const canvasWrap = document.getElementById('edit-occlusion-canvas-wrap');
+            canvasWrap.querySelectorAll('.edit-occlusion-sticker').forEach(el => el.remove());
+            editDraft.occlusions.forEach(function (o) {
+                const div = renderRectBox(canvasWrap, o, 'edit-occlusion-sticker cursor-pointer');
+                div.title = '탭하여 삭제';
+                div.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    editDraft.occlusions = editDraft.occlusions.filter(x => x.id !== o.id);
+                    editRenderOcclusionStickers();
+                });
+            });
+            const countEl = document.getElementById('edit-occlusion-sticker-count');
+            if (countEl) countEl.textContent = editDraft.occlusions.length;
+        }
+
+        // ---- 편집 모달: 2단 카드 ----
+        function editRenderBasicFront() {
+            const wrap = document.getElementById('edit-basic-front-wrap');
+            const img = document.getElementById('edit-basic-front-img');
+            if (!editDraft.frontImage) { wrap.classList.add('hidden'); return; }
+            wrap.classList.remove('hidden');
+
+            function setup() {
+                const canvasWrap = document.getElementById('edit-basic-canvas-wrap');
+                editRenderBasicMask();
+                makeDraggableRectOverlay(canvasWrap, img, function (rect) {
+                    editDraft.mask = rect;
+                    editRenderBasicMask();
+                });
+            }
+
+            img.onload = setup;
+            img.src = editDraft.frontImage;
+            if (img.complete && img.naturalWidth > 0) setup();
+        }
+
+        function editRenderBasicMask() {
+            const canvasWrap = document.getElementById('edit-basic-canvas-wrap');
+            const existing = canvasWrap.querySelector('.edit-basic-mask');
+            if (existing) existing.remove();
+            if (!editDraft.mask) return;
+            renderRectBox(canvasWrap, editDraft.mask, 'edit-basic-mask');
+        }
+
+        function editClearBasicMask() {
+            editDraft.mask = null;
+            editRenderBasicMask();
+        }
+
+        function editRenderBasicBack() {
+            const wrap = document.getElementById('edit-basic-back-wrap');
+            const img = document.getElementById('edit-basic-back-img');
+            if (editDraft.backImage) {
+                img.src = editDraft.backImage;
+                wrap.classList.remove('hidden');
+            } else {
+                wrap.classList.add('hidden');
+            }
+        }
+
+        function editRemoveBasicBackImage() {
+            editDraft.backImage = null;
+            editRenderBasicBack();
+        }
+
+        // ---- 편집 모달: 붙여넣기 처리 ----
+        function handleEditModalPaste(e) {
+            if (!editDraft) return;
+            const clipboard = e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData);
+            if (!clipboard) return;
+            const items = clipboard.items;
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind === 'file' && item.type.indexOf('image/') !== -1) {
+                    const blob = item.getAsFile();
+                    e.preventDefault();
+                    const activeId = document.activeElement ? document.activeElement.id : '';
+
+                    if (activeId === 'edit-case-paste-target') {
+                        processImageFile(blob, (url) => { editDraft.caseImage = url; editRenderCaseImage(); });
+                    } else if (activeId === 'edit-occlusion-paste-target') {
+                        processImageFile(blob, (url) => {
+                            editDraft.image = url;
+                            editDraft.occlusions = []; // 이미지를 교체하면 기존 스티커 좌표는 의미가 없어짐
+                            editRenderOcclusion();
+                        });
+                    } else if (activeId === 'edit-basic-front-paste-target') {
+                        processImageFile(blob, (url) => {
+                            editDraft.frontImage = url;
+                            editDraft.mask = null;
+                            editRenderBasicFront();
+                        });
+                    } else if (activeId === 'edit-basic-back-paste-target') {
+                        processImageFile(blob, (url) => { editDraft.backImage = url; editRenderBasicBack(); });
+                    } else {
+                        return; // 붙여넣기 칸에 포커스가 없으면 아무 것도 하지 않음
+                    }
+
+                    ['edit-case-paste-target', 'edit-occlusion-paste-target', 'edit-basic-front-paste-target', 'edit-basic-back-paste-target'].forEach(pid => {
+                        const el = document.getElementById(pid);
+                        if (el) el.value = '';
+                    });
+                    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                        document.activeElement.blur();
+                    }
+                    showToast('이미지를 붙여넣었습니다!');
+                    break;
+                }
+            }
+        }
+
+        // ---- 편집 모달: 저장 ----
+        async function saveEditedCard() {
+            if (!editingCardId || !editDraft) return;
+            const idx = cards.findIndex(c => c.id === editingCardId);
+            if (idx === -1) { alert('카드를 찾을 수 없습니다.'); closeEditModal(); return; }
+
+            const original = cards[idx];
+            const subject = document.getElementById('edit-subject').value.trim();
+            const unit = document.getElementById('edit-unit').value.trim() || '미분류';
+
+            let updatedRaw = {
+                id: original.id,
+                cardType: original.cardType,
+                subject: subject,
+                category: unit,
+                isWrong: original.isWrong
+            };
+
+            if (original.cardType === 'case_dx_rx') {
+                const caseText = document.getElementById('edit-case-text').value.trim();
+                const diagnosis = document.getElementById('edit-diagnosis').value.trim();
+                const treatment = document.getElementById('edit-treatment').value.trim();
+                if (!caseText && !editDraft.caseImage) return alert('증례 설명이나 사진 중 하나는 필요합니다.');
+                if (!diagnosis) return alert('진단명을 입력해주세요.');
+                if (!treatment) return alert('치료법을 입력해주세요.');
+                Object.assign(updatedRaw, { caseText, caseImage: editDraft.caseImage, diagnosis, treatment });
+            } else if (original.cardType === 'occlusion') {
+                if (!editDraft.image) return alert('이미지가 필요합니다.');
+                Object.assign(updatedRaw, { image: editDraft.image, occlusions: editDraft.occlusions });
+            } else if (original.cardType === 'basic') {
+                const frontText = document.getElementById('edit-basic-front-text').value.trim();
+                const backText = document.getElementById('edit-basic-back-text').value.trim();
+                if (!frontText && !editDraft.frontImage) return alert('앞면에 텍스트나 사진 중 하나는 필요합니다.');
+                if (!backText && !editDraft.backImage) return alert('뒷면에 텍스트나 사진 중 하나는 필요합니다.');
+                Object.assign(updatedRaw, {
+                    frontText, frontImage: editDraft.frontImage, mask: editDraft.mask,
+                    backText, backImage: editDraft.backImage
+                });
+            }
+
+            const updated = normalizeCard(updatedRaw);
+            cards[idx] = updated;
+
+            try {
+                await persistOne(updated);
+            } catch (e) {
+                cards[idx] = original;
+                console.error(e);
+                alert('수정 저장에 실패했습니다: ' + (e && e.message ? e.message : e));
+                return;
+            }
+
+            closeEditModal();
+            updateCardCount();
+            updateGlobalDatalists();
+            updateManageFilters();
+            renderManageList();
+            showToast('카드가 수정되었습니다.');
+        }
+
         // ==================== 3. 학습 기능 및 결과화면 ====================
         function updateStudyFilters() {
             populateSubjectSelect(document.getElementById('study-filter-subject'), '전체 과목');
@@ -1698,11 +2210,11 @@
             if (mode === 'wrong') {
                 currentStudyList = targetCards.filter(c => c.isWrong);
                 document.getElementById('study-mode-badge').textContent = '오답 노트';
-                document.getElementById('study-mode-badge').className = 'text-xs font-mono font-bold bg-wrong/10 text-wrong py-1 px-2 rounded-full';
+                document.getElementById('study-mode-badge').className = 'eyebrow-ko bg-wrong/10 text-wrong py-1.5 px-2.5 rounded-md';
             } else {
                 currentStudyList = [...targetCards];
                 document.getElementById('study-mode-badge').textContent = '모두 학습';
-                document.getElementById('study-mode-badge').className = 'text-xs font-mono font-bold bg-case/10 text-case py-1 px-2 rounded-full';
+                document.getElementById('study-mode-badge').className = 'eyebrow-ko bg-case/10 text-case py-1.5 px-2.5 rounded-md';
             }
 
             document.getElementById('study-target-badge').textContent = targetLabel;
@@ -1801,10 +2313,10 @@
             wrap.innerHTML = '';
             if (count <= 1) return; // 암기 카드처럼 '면' 개념이 없으면 표시하지 않음
             for (let i = 0; i < count; i++) {
-                const dot = document.createElement('div');
+                const tab = document.createElement('div');
                 const color = colorList[i] || 'ink';
-                dot.className = i === activeIndex ? `w-2 h-2 rounded-full bg-${color}` : 'w-2 h-2 rounded-full bg-ink/15';
-                wrap.appendChild(dot);
+                tab.className = `flex-1 chart-tab bg-${color}` + (i === activeIndex ? ' is-active' : '');
+                wrap.appendChild(tab);
             }
         }
 
@@ -1833,7 +2345,7 @@
             updateSideIndicators(3, currentSide, ['case', 'dx', 'rx']);
             document.getElementById('flip-hint').textContent = '클릭해서 다음 장 보기';
 
-            labelEl.className = `absolute top-5 left-5 font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-${active.color}/10 text-${active.color} max-w-[55%] truncate`;
+            labelEl.className = `absolute top-6 left-6 eyebrow-ko px-2 py-1 rounded bg-${active.color}/10 text-${active.color} max-w-[60%] truncate`;
 
             if (currentSide === 0) {
                 labelEl.textContent = `CASE · ${card.category}`;
@@ -1847,10 +2359,10 @@
                 contentEl.innerHTML = html || '<p class="text-ink/30">내용이 없습니다.</p>';
             } else if (currentSide === 1) {
                 labelEl.textContent = 'DX';
-                contentEl.innerHTML = `<h2 class="text-3xl md:text-4xl font-bold text-dx break-keep text-center">${escapeHTML(card.diagnosis)}</h2>`;
+                contentEl.innerHTML = `<h2 class="text-3xl md:text-4xl font-extrabold tracking-[-0.02em] text-dx break-keep text-center">${escapeHTML(card.diagnosis)}</h2>`;
             } else if (currentSide === 2) {
                 labelEl.textContent = 'RX';
-                contentEl.innerHTML = `<p class="text-2xl md:text-3xl font-bold text-rx whitespace-pre-wrap text-center break-keep w-full">${escapeHTML(card.treatment)}</p>`;
+                contentEl.innerHTML = `<p class="text-2xl md:text-3xl font-bold tracking-[-0.01em] text-rx whitespace-pre-wrap text-center break-keep w-full">${escapeHTML(card.treatment)}</p>`;
             }
         }
 
@@ -1862,7 +2374,7 @@
             updateSideIndicators(1, 0, []);
             document.getElementById('flip-hint').textContent = '스티커를 탭해서 확인하기';
 
-            labelEl.className = 'absolute top-5 left-5 font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-ink/10 text-ink/70 max-w-[55%] truncate';
+            labelEl.className = 'absolute top-6 left-6 eyebrow-ko px-2 py-1 rounded bg-ink/[0.06] text-ink/60 max-w-[60%] truncate';
             labelEl.textContent = `암기 · ${card.category}`;
 
             const stickersHtml = card.occlusions.map(o => {
@@ -1888,7 +2400,7 @@
             updateSideIndicators(2, currentSide, ['ink', 'ink']);
             document.getElementById('flip-hint').textContent = '클릭해서 뒤집기';
 
-            labelEl.className = 'absolute top-5 left-5 font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-ink/10 text-ink/70 max-w-[55%] truncate';
+            labelEl.className = 'absolute top-6 left-6 eyebrow-ko px-2 py-1 rounded bg-ink/[0.06] text-ink/60 max-w-[60%] truncate';
 
             if (currentSide === 0) {
                 labelEl.textContent = `앞면 · ${card.category}`;
@@ -1955,10 +2467,10 @@
             document.getElementById('result-accuracy').textContent = `${accuracy}%`;
 
             const circle = document.getElementById('result-circle');
-            circle.style.background = `conic-gradient(#2B6E64 0%, #E7E5DE 0%)`;
+            circle.style.background = `conic-gradient(#1B6B78 0%, #D5DDE0 0%)`;
 
             setTimeout(() => {
-                circle.style.background = `conic-gradient(#2B6E64 ${accuracy}%, #E7E5DE ${accuracy}%)`;
+                circle.style.background = `conic-gradient(#1B6B78 ${accuracy}%, #D5DDE0 ${accuracy}%)`;
             }, 100);
         }
     </script>
